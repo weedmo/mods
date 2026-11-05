@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+node_modules/
+*.d.ts
+jsconfig.json
+*.error
+*.bak
+.DS_Store
+/data/
+/backups/
+/shared.json
+/installed.json
+/settings.json
+/view.json
+/window.json
+/telemetry/
