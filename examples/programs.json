@@ -1,0 +1,6 @@
+{
+  "programs": {
+    "claude": { "run": ["claude", "--dangerously-skip-permissions"] },
+    "codex": { "run": ["codex", "--dangerously-bypass-approvals-and-sandbox"] }
+  }
+}

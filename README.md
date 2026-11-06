@@ -80,3 +80,9 @@ done
 - Workflow 패널은 `Ctrl+Shift+G`로 열거나 닫습니다.
 
 `examples/keys.json`에는 현재 사용하는 재설정 단축키를 반영했습니다. 다른 환경에 설치할 때는 기존 단축키와 병합하세요.
+
+### 재설정 파일과 설치본 대조
+
+`examples/settings.json`, `examples/programs.json`, `examples/themes/`에 현재 화면 설정, 에이전트 실행 명령, 사용자 테마도 보관합니다. 기존 설정을 백업한 뒤 필요한 값을 병합하고 테마를 `$app_home/themes/`에 복사하세요. `programs.json`의 현재 예시는 에이전트 승인 생략 옵션을 포함합니다.
+
+`matt-graph`와 `workspace-chrome-edited`도 설치본에 있는 별도 모드로 함께 보관합니다. 설치본 전체와 저장소를 다시 비교하려면 `python3 scripts/audit-installed-setup.py`를 실행하세요. 이 명령은 사용자 모드 전체를 발견하고 소스와 설정을 바이트 단위로 대조합니다. 앱 제공 모드 중 저장소에 없는 항목과 실행 데이터는 제외합니다. 대조 범위는 [설정 점검 기록](docs/setup-audit.md)을 참고하세요.
