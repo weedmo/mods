@@ -287,13 +287,7 @@ export default class Projects extends View {
   render(cx) {
     const t = theme();
     if (this.mode === "toolbar") {
-      const space = spaces().find(s => s.active);
-      const context = contextForSpace(space, panes(), shared(STATE));
       return h_flex().size_full().items_center().justify_end().gap(4).pr(8).bg(t.chrome)
-        .child(action("space-issues", "Issues", t, () => {
-          if (context) this.overlay("issues", { projectId: context.projectId, locationId: context.location.id, machine: context.machine });
-          else { run("layout.select", { stack: "panel-body", child: "issues" }); run("layout.show", { id: "panel" }); }
-        }))
         .child(action("project-options", "⋯", t, () => this.overlay("manager")));
     }
     if (this.mode !== "sidebar" && this.mode !== "manager") return this.renderDialog(cx, t);

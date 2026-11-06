@@ -25,3 +25,6 @@ shared("projects.catalogs.v1")는 화면의 캐시/오프라인 표시다. 원�
 
 backend.py를 변경하면 backend-source.js를 JSON 문자열로 재생성한다. main.js는 백엔드 소스를 python3 -c의 독립 인자로 전달해 선택한 PC에서 실행한다. shell 문자열에 사용자 입력을 합치지 않는다. 기본 배포 issues/worktree mod는 그대로 두었고 issues-projects 복제본의 상세 화면에 시작 버튼을 추가했다.
 
+개인 레이아웃 변경 전 백업: /home/weed/analysis/herdr-projects/implementation/main-weed.before.json. 다른 변경과 겹칠 수 있으므로 복구할 때 파일 전체 덮어쓰기보다 projects 블록 제거와 issues-projects 참조 복원을 우선한다.
+
+검증: /home/weed/analysis/herdr-projects/implementation/{test_backend.py,test_model.mjs,verify_install.py,verify_remote.py,verify_e2e.py}.

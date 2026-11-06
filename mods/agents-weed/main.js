@@ -3,7 +3,24 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, appHome } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, appHome, keys } from "herdr";
+
+// Resolve displayed shortcuts from the live keymap, rather than duplicating bindings.
+function shortcutTip(label, action, iconOnly = true) {
+  const shortcuts = [...new Set(keys().filter(k => k.section === "global" && k.action === action).map(k =>
+    k.keys.split("-").map(p => ({ctrl:"Ctrl",alt:"Alt",shift:"Shift",cmd:"Super"})[p] ?? (p.length === 1 ? p.toUpperCase() : p)).join("+")
+  ))].join(" / ");
+  return iconOnly ? label + (shortcuts ? " / " + shortcuts : "") : shortcuts;
+}
+
+
+// Select the model tab explicitly: pane focus alone can leave the space's previous tab visible.
+function focusAgent(a) {
+  if (a.space) run("space.select", { id: a.space });
+  if (a.tab) run("tab.select", { id: a.tab });
+  if (a.pane) run("pane.focus", { pane: a.pane });
+  else run("agent.focus", { terminal: a.address });
+}
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -316,7 +333,7 @@ export default class Agents extends View {
           .gap(4)
           .hover((s) => s.bg(t.hover))
           .on_mouse_down("left", () => { this.dragAgent = a.address; })
-          .on_click(() => run("pane.focus", { pane: a.pane }))
+          .on_click(() => focusAgent(a))
           .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
           .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
       }
@@ -361,7 +378,7 @@ export default class Agents extends View {
           cx.notify();
         })
         .on_mouse_down("left", () => { this.dragAgent = a.address; })
-        .on_click(() => run("pane.focus", { pane: a.pane }))
+        .on_click(() => focusAgent(a))
         .when(Boolean(pic), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
@@ -432,7 +449,7 @@ export default class Agents extends View {
         const terminal = this.dragAgent;
         this.dragAgent = null;
         if (this.edge !== null && this.edge <= 24)
-          openOverlay({ mod: "tab-drop", kind: "window", frame: "none", width: 1, height: 1, at: { x: 0, y: 0 }, props: { terminal } });
+          openOverlay({ mod: "tab-drop", kind: "window", frame: "none", width: 1, height: 1, at: { x: 0, y: 0 }, props: { terminal, target: focused()?.pane } });
       })
       .bg(t.chrome)
       .border_t(1)
@@ -451,7 +468,7 @@ export default class Agents extends View {
             .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Agents"))
             .child(div().id("agent-session-history").text_size(11).text_color(t.muted)
               .cursor_pointer().hover(el => el.text_color(t.foreground))
-              .tooltip("Saved sessions and archive · Ctrl+Shift+H")
+              .tooltip(shortcutTip("저장된 세션", "mod.open:sessions-weed", false))
               .on_click(() => run("mod.open", { name: "sessions-weed" })).child("Sessions"))
             .child(
               div()

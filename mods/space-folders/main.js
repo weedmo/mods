@@ -14,7 +14,16 @@ import { contextForSpace } from "./project-context.js";
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, nextCommand } from "herdr";
+import { spaces, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, appHome, readTextFile, nextCommand, keys } from "herdr";
+
+// Resolve displayed shortcuts from the live keymap, rather than duplicating bindings.
+function shortcutTip(label, action, iconOnly = true) {
+  const shortcuts = [...new Set(keys().filter(k => k.section === "global" && k.action === action).map(k =>
+    k.keys.split("-").map(p => ({ctrl:"Ctrl",alt:"Alt",shift:"Shift",cmd:"Super"})[p] ?? (p.length === 1 ? p.toUpperCase() : p)).join("+")
+  ))].join(" / ");
+  return iconOnly ? label + (shortcuts ? " / " + shortcuts : "") : shortcuts;
+}
+
 
 // A machine's folders live in a file in its home, so every screen showing its
 // spaces shows the same folders: { list: [{ id, name, folded }], of: { spaceId:
@@ -56,7 +65,8 @@ async function newSpaceIn(machine, id) {
   setShared("space-folders.new", { machine, id, before: spaces().map((s) => s.id), until: Date.now() + 60000 });
   const path = id && folders(machine).list.find((f) => f.id === id)?.path;
   const folder = path ? await expand(machine, path).catch(() => null) : null;
-  run("space.new", { ...(machine ? { machine } : {}), ...(folder ? { folder } : {}) });
+  // Empty string explicitly selects this computer; omission inherits the focused machine.
+  run("space.new", { machine: machine ?? "", ...(folder ? { folder } : {}) });
 }
 
 // A rule of "Collect spaces from" takes a folder and everything in it. "~" is
@@ -504,15 +514,52 @@ export default class Spaces extends View {
     if (this.nameMirror && part && part !== this.name.value()) this.name.set_value(part);
   }
 
-  // The system's folder picker, for this computer: home written as "~".
+  applyPath(path) {
+    this.path.set_value(path);
+    if (this.mirror) this.match.set_value(path);
+    this.follow();
+  }
+
   choose(cx) {
+    if (this.choosing) return;
+    this.choosing = true;
+    this.chooseError = null;
+    cx.notify();
     cx.spawn(async (cx) => {
-      const picked = await pickFolder({ prompt: "Start new spaces in" });
-      if (!picked) return;
-      this.path.set_value(picked.startsWith(home()) ? `~${picked.slice(home().length)}` : picked);
-      if (this.mirror) this.match.set_value(this.path.value());
-      this.follow();
-      cx.notify();
+      try {
+        let picked;
+        const machine = this.editing.machine;
+        if (machine) {
+          const result = await hc(["machine", "ls", "--json"]);
+          const remote = JSON.parse(result.stdout).machines.find(m => m.name === machine);
+          if (!remote?.target) throw new Error("Could not find this machine's SSH connection.");
+          const path = await expand(machine, this.path.value().trim() || "~");
+          const output = appHome() + "/data/folder-pick-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".json";
+          const response = await exec("/usr/bin/python3", ["-c",
+            "import subprocess,sys; subprocess.Popen(sys.argv[1:], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)",
+            "/usr/bin/python3", appHome() + "/mods/space-folders/pick-folder.py", remote.target, path, output]);
+          if (response.code) throw new Error(response.stderr || "Could not open the Linux folder chooser.");
+          let text;
+          while ((text = await readTextFile(output)) === null) {
+            await new Promise(resolve => cx.timer.after(300, resolve));
+          }
+          const selection = JSON.parse(text);
+          await exec("/usr/bin/python3", ["-c", "import os,sys; os.unlink(sys.argv[1])", output]);
+          if (selection.error) throw new Error(selection.error);
+          picked = selection.path;
+        } else {
+          picked = await pickFolder({ prompt: "Start new spaces in" });
+        }
+        if (picked) {
+          const base = machine ? null : home();
+          this.applyPath(base && picked === base ? "~" : base && picked.startsWith(base + "/") ? `~${picked.slice(base.length)}` : picked);
+        }
+      } catch (error) {
+        this.chooseError = String(error.message ?? error);
+      } finally {
+        this.choosing = false;
+        cx.notify();
+      }
     });
   }
 
@@ -625,7 +672,8 @@ export default class Spaces extends View {
       .child(div().text_size(15).font_semibold().child("Edit folder"))
       .child(field("Name", this.name, null))
       .child(field("Start new spaces in", this.path, "Its + and New space here open a space there.",
-        machine ? null : button("folder-choose", "Choose…", false, (_e, cx) => this.choose(cx))))
+        button("folder-choose", this.choosing ? "Opening…" : "Choose…", false, (_e, cx) => this.choose(cx))))
+      .when(Boolean(this.chooseError), el => el.child(div().text_size(12).text_color(t.blocked).child(this.chooseError)))
       .child(field("Collect spaces from", this.match,
         "Spaces working in these folders join this one. Comma-separated: a folder name like wbso-ai, or a path like ~/code/client-*."))
       .child(h_flex().pt(4).gap(8).justify_end()
@@ -684,7 +732,7 @@ export default class Spaces extends View {
         .when(!connected, el => el.child(div().flex_none().child((machine?.state ?? "asleep").replace(/_/g, " "))))
         .when(connected, el => el.child(div().id(`machine-folder-${m ?? "local"}`).flex_none().px(3).rounded(4).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click((_e, cx) => { cx.stop_propagation(); this.newFolder(m); }).child(svg("mods/workspace-chrome/folder-plus.svg").size(12))))
-        .when(connected, el => el.child(div().id(`machine-add-${m ?? "local"}`).flex_none().px(4).rounded(4).hover(s => s.bg(t.hover).text_color(t.foreground))
+        .when(connected, el => el.child(div().id(`machine-add-${m ?? "local"}`).tooltip(`${m ?? "이 컴퓨터"}에 새 작업 공간 만들기`).flex_none().px(4).rounded(4).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click((_e, cx) => { cx.stop_propagation(); newSpaceIn(m, null); }).child("+")))
         .child(div().size(6).rounded(3).flex_none().bg(connected ? t.ansi2 : t.dim))
         .child(svg(`mods/workspace-chrome/chevron-${folded ? "right" : "down"}.svg`).size(11).flex_none()));
@@ -839,7 +887,7 @@ export default class Spaces extends View {
     const dragged = this.pressed !== null ? spaces()[this.pressed] : null;
     const leaving = Boolean(dragged && folderOf(dragged, folders(dragged.machine ?? null), panes()));
     const button = (id, icon, action) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6)
-      .hover(s => s.bg(t.hover).text_color(t.foreground)).on_click(action).child(svg(`mods/workspace-chrome/${icon}.svg`).size(14));
+      .tooltip(id === "space-new" ? "이 컴퓨터에 새 작업 공간 만들기" : "폴더 만들기").hover(s => s.bg(t.hover).text_color(t.foreground)).on_click(action).child(svg(`mods/workspace-chrome/${icon}.svg`).size(14));
     const seen = [], rows = this.grouped(t, collapsed, seen);
     this.seen = seen;
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)

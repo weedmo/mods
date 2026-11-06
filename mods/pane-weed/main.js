@@ -9,7 +9,16 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, props, run, theme, home, shared, setShared } from "herdr";
+import { panes, props, run, theme, home, shared, setShared, keys } from "herdr";
+
+// Resolve displayed shortcuts from the live keymap, rather than duplicating bindings.
+function shortcutTip(label, action, iconOnly = true) {
+  const shortcuts = [...new Set(keys().filter(k => k.section === "global" && k.action === action).map(k =>
+    k.keys.split("-").map(p => ({ctrl:"Ctrl",alt:"Alt",shift:"Shift",cmd:"Super"})[p] ?? (p.length === 1 ? p.toUpperCase() : p)).join("+")
+  ))].join(" / ");
+  return iconOnly ? label + (shortcuts ? " / " + shortcuts : "") : shortcuts;
+}
+
 
 const DRAG_KEY = "pane-weed.drag";
 const STALE_MS = 15000; // a drag released over a terminal body is never reported; let it lapse
@@ -47,6 +56,7 @@ export default class Pane extends View {
   button(t, id, icon, command, args) {
     return div()
       .id(id)
+      .tooltip(shortcutTip(({"pane.split": args?.direction === "right" ? "오른쪽으로 분할" : "아래로 분할", "pane.zoom": "분할 창 확대 / 복원", "pane.close": "분할 창 닫기"})[command], command + (args?.direction ? ":" + args.direction : "")))
       .p(3)
       .rounded(4)
       .text_color(t.dim)

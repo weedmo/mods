@@ -50,7 +50,7 @@
     "ctrl-shift-t": "tab.new",
     "ctrl-shift-k": "mod.open:picker",
     "ctrl-shift-p": "app.palette",
-    "ctrl-,": "app.settings",
+    "ctrl-,": "mod.open:settings-weed",
     "ctrl-shift-o": "pane.split:right",
     "ctrl-shift-e": "pane.split:down",
     "ctrl-shift-w": "tab.close",
@@ -129,6 +129,7 @@
       }
     },
     "ctrl-shift-h": "mod.open:sessions-weed",
+    "ctrl-shift-g": "tabs-weed.panel-workflow",
     "ctrl-alt-up": "agent.prev",
     "ctrl-alt-down": "agent.next"
   },

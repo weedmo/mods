@@ -50,6 +50,19 @@
           ]
         },
         {
+          "id": "automation-options",
+          "type": "block",
+          "size": {
+            "px": 40
+          },
+          "content": {
+            "mod": "automations",
+            "props": {
+              "mode": "sidebar"
+            }
+          }
+        },
+        {
           "id": "sidebar-footer",
           "type": "block",
           "content": {
@@ -92,10 +105,10 @@
               }
             },
             {
-              "id": "issues-button",
+              "id": "project-options",
               "type": "block",
               "size": {
-                "px": 112
+                "px": 40
               },
               "window_drag": true,
               "content": {
@@ -174,6 +187,13 @@
                       "type": "block",
                       "content": {
                         "mod": "git-graph"
+                      }
+                    },
+                    {
+                      "id": "workflow",
+                      "type": "block",
+                      "content": {
+                        "mod": "workflow-graph"
                       }
                     }
                   ],
