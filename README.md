@@ -30,22 +30,19 @@
 
 Herdr 0.1.13 환경에서 수집했습니다. Herdr와 기본 제공 모드가 먼저 설치되어 있어야 합니다. Python 보조 프로그램에는 `python3`, Git 작업에는 `git`, GitHub 이슈에는 인증된 `gh`가 필요합니다. Projects는 POSIX 환경을 사용합니다.
 
-저장소 루트에서 실행합니다. 기존 사용자 모드 및 레이아웃을 먼저 백업한 뒤, 같은 이름의 모드를 업데이트합니다.
+저장소 루트에서 아래 명령 하나로 모드, `main-weed` 레이아웃, 단축키(`keys.json`), 화면 설정(`settings.json`), 에이전트 실행 명령(`programs.json`), 사용자 테마를 모두 적용합니다. 기존 파일은 `$app_home/backups/setup-<시각>/`에 먼저 백업합니다.
 
 ```sh
-app_home="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
-backup="$app_home/backups/mods-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$backup" "$app_home/mods" "$app_home/layouts"
-cp -a "$app_home/mods" "$backup/mods"
-cp -a "$app_home/layouts" "$backup/layouts"
-cp -R mods/. "$app_home/mods/"
-cp layouts/main-weed.json "$app_home/layouts/main-weed.json"
-herdr-app do layout.switch '{"name":"main-weed"}'
+python3 scripts/install.py                      # 전체 적용 (단축키·설정은 병합, 저장소 값 우선)
+python3 scripts/install.py --with-automations --with-statusline   # 자동화 서비스와 상태줄 스크립트까지
+python3 scripts/install.py --replace            # keys/settings/programs를 병합 대신 저장소 값으로 덮어쓰기
 ```
+
+`keys.json`·`settings.json`·`programs.json`은 기본적으로 병합하므로 저장소에 있는 단축키는 모두 적용되고, 그 PC에만 있던 단축키는 유지됩니다. 설치 후 열린 창을 `main-weed` 레이아웃으로 전환합니다(`--no-switch`로 생략).
 
 모드 이름은 이미지 경로와 모드 간 호출에 사용하므로 폴더 이름을 유지합니다. `main-weed`는 이 저장소의 `workspace-chrome`과 기본 제공 `workspace-status`, `files`도 사용합니다. 설치된 모드는 Herdr에서 자동으로 다시 읽습니다.
 
-`examples/keys.json`은 개인 단축키 예시입니다. 기존 `keys.json`에 필요한 항목을 병합해서 사용합니다. 세션 창은 `mod.open:sessions-weed`, 에이전트 복원은 `mod.open:agent-resume`, 단축키 편집은 `mod.open:keymap`으로 열 수 있습니다.
+`examples/keys.json`은 현재 사용하는 단축키 전체이며 `scripts/install.py`가 자동 병합합니다. 세션 창은 `mod.open:sessions-weed`, 에이전트 복원은 `mod.open:agent-resume`, 단축키 편집은 `mod.open:keymap`으로 열 수 있습니다.
 
 ### 사용량 상태줄 보조 스크립트
 
@@ -79,10 +76,10 @@ done
 - Agents 항목은 해당 공간, 탭, 분할 터미널을 함께 선택합니다.
 - Workflow 패널은 `Ctrl+Shift+G`로 열거나 닫습니다.
 
-`examples/keys.json`에는 현재 사용하는 재설정 단축키를 반영했습니다. 다른 환경에 설치할 때는 기존 단축키와 병합하세요.
+`examples/keys.json`에는 현재 사용하는 재설정 단축키를 반영했고, `scripts/install.py`가 설치 시 자동 병합합니다.
 
 ### 재설정 파일과 설치본 대조
 
-`examples/settings.json`, `examples/programs.json`, `examples/themes/`에 현재 화면 설정, 에이전트 실행 명령, 사용자 테마도 보관합니다. 기존 설정을 백업한 뒤 필요한 값을 병합하고 테마를 `$app_home/themes/`에 복사하세요. `programs.json`의 현재 예시는 에이전트 승인 생략 옵션을 포함합니다.
+`examples/settings.json`, `examples/programs.json`, `examples/themes/`에 현재 화면 설정, 에이전트 실행 명령, 사용자 테마도 보관합니다. `scripts/install.py`가 백업 후 설정을 병합하고 테마를 `$app_home/themes/`에 복사합니다. `programs.json`의 현재 예시는 에이전트 승인 생략 옵션을 포함합니다.
 
 `matt-graph`와 `workspace-chrome-edited`도 설치본에 있는 별도 모드로 함께 보관합니다. 설치본 전체와 저장소를 다시 비교하려면 `python3 scripts/audit-installed-setup.py`를 실행하세요. 이 명령은 사용자 모드 전체를 발견하고 소스와 설정을 바이트 단위로 대조합니다. 앱 제공 모드 중 저장소에 없는 항목과 실행 데이터는 제외합니다. 대조 범위는 [설정 점검 기록](docs/setup-audit.md)을 참고하세요.
