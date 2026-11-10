@@ -4,5 +4,9 @@
     "enabled": true
   },
   "minimum_contrast": 1,
-  "appearance": "dark"
+  "appearance": "dark",
+  "theme": {
+    "light": "paper",
+    "dark": "graphite"
+  }
 }

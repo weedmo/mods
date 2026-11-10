@@ -26,11 +26,21 @@
 
 `cloned_from` 메타데이터와 기존 파일의 출처·라이선스 표기는 그대로 유지합니다. 이 저장소 전체에 적용할 별도 라이선스는 지정하지 않았습니다.
 
+## 새 PC 빠른 시작
+
+Herdr 설치부터 현재 화면(다크 `graphite` 배경, `main-weed` 레이아웃, 단축키, 모드)까지 한 줄로 맞춥니다. Herdr를 닫은 상태에서 실행하면 첫 실행 환영 화면 없이 바로 `main-weed`로 열립니다.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/weedmo/mods/main/scripts/bootstrap.sh | sh
+```
+
+AI 에이전트에게 맡기려면 [docs/ai-setup-prompt.md](docs/ai-setup-prompt.md)의 프롬프트를 그대로 붙여넣습니다.
+
 ## 설치
 
 Herdr 0.1.13 환경에서 수집했습니다. Herdr와 기본 제공 모드가 먼저 설치되어 있어야 합니다. Python 보조 프로그램에는 `python3`, Git 작업에는 `git`, GitHub 이슈에는 인증된 `gh`가 필요합니다. Projects는 POSIX 환경을 사용합니다.
 
-저장소 루트에서 아래 명령 하나로 모드, `main-weed` 레이아웃, 단축키(`keys.json`), 화면 설정(`settings.json`), 에이전트 실행 명령(`programs.json`), 사용자 테마를 모두 적용합니다. 기존 파일은 `$app_home/backups/setup-<시각>/`에 먼저 백업합니다.
+저장소 루트에서 아래 명령 하나로 모드, `main-weed` 레이아웃, 단축키(`keys.json`), 화면 설정(`settings.json`, 다크 테마 `graphite` 고정), 에이전트 실행 명령(`programs.json`), 사용자 테마를 모두 적용합니다. 기존 파일은 `$app_home/backups/setup-<시각>/`에 먼저 백업합니다.
 
 ```sh
 python3 scripts/install.py                      # 전체 적용 (단축키·설정은 병합, 저장소 값 우선)

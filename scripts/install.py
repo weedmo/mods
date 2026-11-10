@@ -90,8 +90,20 @@ def main():
     if args.with_automations:
         subprocess.run([sys.executable, str(repo / 'scripts/herdr-automations/install.py')], check=True)
 
-    if not args.no_switch and shutil.which('herdr-app'):
+    running = shutil.which('herdr-app') and subprocess.run(
+        ['herdr-app', 'status'], capture_output=True).returncode == 0
+    if not args.no_switch and running:
         subprocess.run(['herdr-app', 'do', 'layout.switch', '{"name":"main-weed"}'], check=False)
+    elif not args.no_switch:
+        # App closed: preselect the layout and skip the first-run welcome so the
+        # next launch opens straight into main-weed.
+        shared = home / 'shared.json'
+        state = json.loads(shared.read_text()) if shared.exists() else {}
+        if shared.exists():
+            shutil.copy2(shared, backup / 'shared.json')
+        state.update({'layout': 'main-weed', 'frame.welcomed': 'finished'})
+        write_json(shared, state)
+        print('shared.json: layout=main-weed, welcome skipped')
 
 
 if __name__ == '__main__':
