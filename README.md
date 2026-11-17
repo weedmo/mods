@@ -21,6 +21,8 @@
 | `reviewer` | Git 변경사항과 diff 리뷰 |
 | `git-graph` | Git 커밋 그래프와 저장소 작업 |
 | `workflow-graph` | Claude workflow · matt-auto · autocode 실행을 레인 그래프로 표시 (오른쪽 패널, Ctrl+Shift+G) |
+| `artifact-view` | Claude/Codex가 만든 HTML·링크를 headless Chrome으로 렌더링해 오른쪽 패널에 표시. 현재 space의 파일만 표시 (Ctrl+Shift+A) |
+| `artifact-ask` | HTML 파일·링크 Ctrl+클릭 시 "옆에서 보기 / Chrome에서 열기" 선택 창 |
 | `keymap` | 단축키 조회와 편집 |
 | `usage-weed` | Claude/Codex 사용량 표시 |
 
@@ -77,6 +79,12 @@ done
 ### 자동화 서비스
 
 `automations`는 mod 복사 외에 독립 예약 서비스 설치가 필요합니다. `python3 scripts/herdr-automations/install.py`를 실행하세요. 자세한 정책·복구·제거 방법은 [자동화 안내](docs/automations.md)를 참고하세요.
+
+### Artifact 패널
+
+`artifact-view`는 현재 space에 속한 HTML만 보여줍니다: space 폴더, 그 space 터미널들의 폴더, 그 space에서 실행 중인 Claude 세션의 scratchpad. 홈 폴더 자체는 모든 space가 공유하므로 탐색하지 않습니다. 렌더링에는 Node와 Chrome/Chromium이 필요합니다.
+
+Ctrl+클릭 선택 창을 쓰려면 `scripts/artifact-open/install.sh`를 실행하세요. `.html`과 `http(s)` 링크의 기본 프로그램을 `herdr-artifact-open`으로 바꿉니다. 링크는 Herdr에서 열었을 때만 선택 창을 띄우고, 다른 프로그램에서 연 링크는 바로 브라우저로 엽니다. 되돌리기: `xdg-mime default google-chrome.desktop text/html application/xhtml+xml x-scheme-handler/http x-scheme-handler/https`
 
 ### 최근 Herdr 재설정 반영
 
