@@ -1,0 +1,48 @@
+#!/bin/sh
+# System handler for .html files and http(s) links: when Herdr is running, ask (in Herdr)
+# whether to show it in the Artifact side panel or in Chrome; otherwise open it in Chrome.
+# Links ask only when Herdr itself opened them (Ctrl+click in a terminal); links from any
+# other program go straight to the browser.
+# Registered as the default for text/html and x-scheme-handler/http(s) by herdr-artifact-open.desktop.
+BROWSER_BIN=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || echo xdg-open)
+HERDR=$HOME/.local/bin/herdr-app
+[ -x "$HERDR" ] || HERDR=$(command -v herdr-app)
+
+# True when a herdr-app process is among this script's ancestors.
+from_herdr() {
+  pid=$PPID
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null; do
+    [ "$(cat /proc/"$pid"/comm 2>/dev/null)" = herdr-app ] && return 0
+    pid=$(awk '/^PPid:/ {print $2}' /proc/"$pid"/status 2>/dev/null)
+  done
+  return 1
+}
+
+arg=$1
+kind=file
+case "$arg" in
+  file://*) path=$(python3 -c 'import sys,urllib.parse as u; print(u.unquote(u.urlparse(sys.argv[1]).path))' "$arg") ;;
+  http://*|https://*) path=$arg; kind=url; from_herdr || exec "$BROWSER_BIN" "$arg" ;;
+  *://*) exec "$BROWSER_BIN" "$arg" ;;
+  *) path=$(realpath -- "$arg" 2>/dev/null || printf '%s' "$arg") ;;
+esac
+
+if [ -z "$HERDR" ] || { [ "$kind" = file ] && [ ! -f "$path" ]; } || ! status=$("$HERDR" status 2>/dev/null); then
+  exec "$BROWSER_BIN" "$path"
+fi
+
+state=$HOME/.local/state/herdr-artifact
+mkdir -p "$state"
+python3 - "$path" "$BROWSER_BIN" "$state/ask.json" "$kind" <<'PY'
+import json, os, sys, time
+path, browser, out, kind = sys.argv[1:5]
+tmp = out + ".tmp"
+with open(tmp, "w") as f:
+    json.dump({"path": path, "kind": kind, "browser": browser, "at": int(time.time() * 1000)}, f)
+os.replace(tmp, out)
+PY
+# mod.open toggles: only open the dialog when it isn't already showing (it reloads the request).
+case "$status" in
+  *artifact-ask*) ;;
+  *) "$HERDR" do mod.open '{"name":"artifact-ask"}' >/dev/null 2>&1 || exec "$BROWSER_BIN" "$path" ;;
+esac

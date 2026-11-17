@@ -195,6 +195,13 @@
                       "content": {
                         "mod": "workflow-graph"
                       }
+                    },
+                    {
+                      "id": "artifact",
+                      "type": "block",
+                      "content": {
+                        "mod": "artifact-view"
+                      }
                     }
                   ],
                   "active": "files"
