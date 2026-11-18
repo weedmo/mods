@@ -17,6 +17,7 @@
 | `tabs-weed` | 사용자화한 탭 표시와 조작 |
 | `tab-drop` | 탭·에이전트 드래그의 분할 위치 표시 |
 | `pane-weed` | 사용자화한 터미널 패널 헤더 |
+| `files-weed` | 우측 Files 패널 (기본 `files` 복제). 터미널 우클릭 메뉴의 `Open <경로>`로 파일을 바로 엽니다 |
 | `menu-weed` | 사용자화한 터미널 컨텍스트 메뉴 |
 | `reviewer` | Git 변경사항과 diff 리뷰 |
 | `git-graph` | Git 커밋 그래프와 저장소 작업 |
@@ -52,7 +53,7 @@ python3 scripts/install.py --replace            # keys/settings/programs를 병�
 
 `keys.json`·`settings.json`·`programs.json`은 기본적으로 병합하므로 저장소에 있는 단축키는 모두 적용되고, 그 PC에만 있던 단축키는 유지됩니다. 설치 후 열린 창을 `main-weed` 레이아웃으로 전환합니다(`--no-switch`로 생략).
 
-모드 이름은 이미지 경로와 모드 간 호출에 사용하므로 폴더 이름을 유지합니다. `main-weed`는 이 저장소의 `workspace-chrome`과 기본 제공 `workspace-status`, `files`도 사용합니다. 설치된 모드는 Herdr에서 자동으로 다시 읽습니다.
+모드 이름은 이미지 경로와 모드 간 호출에 사용하므로 폴더 이름을 유지합니다. `main-weed`는 이 저장소의 `workspace-chrome`과 기본 제공 `workspace-status`도 사용합니다. 설치된 모드는 Herdr에서 자동으로 다시 읽습니다.
 
 `examples/keys.json`은 현재 사용하는 단축키 전체이며 `scripts/install.py`가 자동 병합합니다. 세션 창은 `mod.open:sessions-weed`, 에이전트 복원은 `mod.open:agent-resume`, 단축키 편집은 `mod.open:keymap`으로 열 수 있습니다.
 
