@@ -1,0 +1,9 @@
+{
+  "place": "none",
+  "title": "Project spaces",
+  "cloned_from": {
+    "name": "spaces",
+    "version": "0.1.10"
+  },
+  "derived_from": "space-folders"
+}
