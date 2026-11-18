@@ -65,6 +65,32 @@ python3 scripts/install.py --replace            # keys/settings/programs를 병�
 
 Spaces의 원격 폴더 선택은 Linux GTK 기본 파일 선택창과 GVfs SFTP를 사용합니다. 로컬 PC에 `/usr/bin/python3`, PyGObject GTK 3, GVfs SFTP 백엔드가 필요하며 SSH 연결 설정을 사용합니다. 로컬 폴더는 Herdr의 시스템 선택기를 사용합니다.
 
+## 버전과 업데이트
+
+저장소 전체 버전은 `VERSION`, mod별 버전은 각 `mods/<name>/mod.json`의 `version`에 있습니다(semver). 릴리스마다 `vX.Y.Z` 태그와 GitHub Release를 만들고, 변경 내역은 `CHANGELOG.md`에 쌓입니다.
+
+```sh
+python3 scripts/versions.py list              # 저장소·mod 버전 보기
+python3 scripts/versions.py check             # 모든 mod에 버전이 있는지 검사
+python3 scripts/release.py patch --dry-run    # 릴리스 계획만 보기
+python3 scripts/release.py patch|minor|major|X.Y.Z
+```
+
+- `release.py`는 `origin/main`의 임시 worktree에서 동작하므로 로컬의 커밋 안 한 작업은 릴리스에 섞이지 않습니다. main에 merge한 뒤 실행합니다.
+- 직전 태그 이후 파일이 바뀐 mod는 patch를 자동으로 올립니다. 기능 추가처럼 더 크게 올리려면 PR에서 그 mod의 `version`을 직접 올립니다(그 경우 자동으로 올리지 않음). 버전이 없는 새 mod는 1.0.0이 됩니다.
+
+다른 PC 설치본 업데이트는 수동입니다.
+
+```sh
+python3 scripts/update.py --check             # 설치 버전 vs 최신, 바뀌는 mod 보기
+python3 scripts/update.py                     # 이 PC를 최신 릴리스로 (install.py 인자 전달 가능)
+python3 scripts/update.py --version 1.0.0     # 특정 릴리스로 (되돌리기 포함)
+python3 scripts/update.py --on vn_server      # hc로 다른 PC에서 실행 (반복 가능)
+python3 scripts/update.py --all-machines      # 연결된 모든 hc PC
+```
+
+릴리스는 `~/.cache/herdr-mods`로 받아 그 안의 `install.py`를 실행하므로 `~/mods` 작업 트리와 무관합니다. 설치된 버전은 `~/.local/state/herdr-mods/installed.json`에 기록됩니다. 원격 PC에는 `python3`, `git`과 GitHub 접근이 필요합니다. 검증: `python3 tests/versions/test_versions.py`.
+
 ## 개발 및 검증
 
 이 모드는 HTML/Node 앱이 아니라 Herdr의 GPUI JavaScript 런타임에서 실행됩니다. `.d.ts`와 `jsconfig.json`은 Herdr가 생성하므로 저장소에서 제외합니다.

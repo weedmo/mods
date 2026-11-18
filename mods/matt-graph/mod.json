@@ -1,1 +1,6 @@
-{"name":"Matt ticket graph","place":"none","size":640}
+{
+  "name": "Matt ticket graph",
+  "place": "none",
+  "size": 640,
+  "version": "1.0.0"
+}

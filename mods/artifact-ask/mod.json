@@ -1,1 +1,10 @@
-{ "place": "none", "title": "Open artifact", "overlay": { "kind": "dialog", "width": 460, "height": 160 } }
+{
+  "place": "none",
+  "title": "Open artifact",
+  "overlay": {
+    "kind": "dialog",
+    "width": 460,
+    "height": 160
+  },
+  "version": "1.0.0"
+}

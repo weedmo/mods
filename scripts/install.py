@@ -43,6 +43,25 @@ def copy_tree(src, dst):
             shutil.copy2(path, target)
 
 
+def record_install(mods):
+    """Note which release and mod versions this PC now runs (read by update.py)."""
+    def version_of(name):
+        try:
+            return json.loads((repo / 'mods' / name / 'mod.json').read_text()).get('version')
+        except (OSError, json.JSONDecodeError):
+            return None
+    version_file = repo / 'VERSION'
+    record = {
+        'version': version_file.read_text().strip() if version_file.exists() else None,
+        'installedAt': datetime.datetime.now().isoformat(timespec='seconds'),
+        'mods': {name: version_of(name) for name in mods},
+    }
+    path = Path.home() / '.local/state/herdr-mods/installed.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, record)
+    print('installed version', record['version'])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--replace', action='store_true', help='overwrite keys/settings/programs instead of merging')
@@ -66,6 +85,7 @@ def main():
     for name in mods:
         copy_tree(repo / 'mods' / name, home / 'mods' / name)
     print('mods', len(mods))
+    record_install(mods)
 
     (home / 'layouts').mkdir(parents=True, exist_ok=True)
     for path in (repo / 'layouts').glob('*.json'):

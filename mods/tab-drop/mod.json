@@ -1,1 +1,5 @@
-{ "place": "none", "title": "Tab drop" }
+{
+  "place": "none",
+  "title": "Tab drop",
+  "version": "1.0.0"
+}
