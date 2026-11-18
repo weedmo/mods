@@ -129,6 +129,7 @@
       }
     },
     "ctrl-shift-h": "mod.open:sessions-weed",
+    "ctrl-alt-p": "tabs-weed.panel-lead",
     "ctrl-shift-g": "tabs-weed.panel-workflow",
     "ctrl-shift-a": "tabs-weed.panel-artifact",
     "ctrl-alt-up": "agent.prev",

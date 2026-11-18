@@ -8,15 +8,18 @@
 | --- | --- |
 | `automations` | 로컬 Claude/Codex 반복 예약, 조건 검사, 실행 이력 ([설치/사용 안내](docs/automations.md)) |
 | `projects` | PC별 저장소 등록, 프로젝트와 worktree 작업 관리 |
-| `space-folders` | Spaces 탐색과 프로젝트 연결 표시 |
+| `space-folders` | Spaces 탐색과 프로젝트 연결 표시 (설치는 유지, `main-weed` 사이드바는 이제 `project-spaces` 사용) |
+| `project-spaces` | 사이드바 (`space-folders` 기반). git origin 원격(host/owner/repo, ssh·https 동일 취급)으로 묶은 프로젝트 → 사용하는 PC → 그 PC의 space 트리. 원격 없는 space는 PC별 `기타`. 프로젝트 `+`는 PC 추가(기존 폴더 연결 / 백그라운드 hc 터미널에서 클론), PC `+`는 space 만들기(체크아웃·새 worktree·하위 폴더), PC 우클릭은 역할(impl/QA/plan) 지정. 레지스트리는 이 노트북의 `~/.config/herdr-projects/projects.json` |
+| `project-lead` | 오른쪽 패널 (Ctrl+Alt+P). 프로젝트별 PC·역할·현재 작업·상태·마지막 보고 표시. `herdr-lead` 스킬이 쓰는 `lead-state.json`을 읽기만 함 |
 | `issues` | GitHub 이슈 탐색과 상세 보기 |
 | `issues-projects` | 프로젝트 작업 시작 기능을 연결한 이슈 패널 |
 | `sessions-weed` | Claude/Codex 세션 탐색 및 재개 |
 | `agent-resume` | 에이전트가 종료되고 셸만 남은 터미널에서 세션 복원 |
-| `agents-weed` | 사용자화한 에이전트 목록 |
+| `agents-weed` | 사용자화한 에이전트 목록. `project-spaces`가 있으면 프로젝트별로 묶어 보기 가능 (`project-spaces.projects`) |
 | `tabs-weed` | 사용자화한 탭 표시와 조작 |
 | `tab-drop` | 탭·에이전트 드래그의 분할 위치 표시 |
 | `pane-weed` | 사용자화한 터미널 패널 헤더 |
+| `files-weed` | 우측 Files 패널 (기본 `files` 복제). 터미널 우클릭 메뉴의 `Open <경로>`로 파일을 바로 엽니다 |
 | `menu-weed` | 사용자화한 터미널 컨텍스트 메뉴 |
 | `reviewer` | Git 변경사항과 diff 리뷰 |
 | `git-graph` | Git 커밋 그래프와 저장소 작업 |
@@ -52,7 +55,7 @@ python3 scripts/install.py --replace            # keys/settings/programs를 병�
 
 `keys.json`·`settings.json`·`programs.json`은 기본적으로 병합하므로 저장소에 있는 단축키는 모두 적용되고, 그 PC에만 있던 단축키는 유지됩니다. 설치 후 열린 창을 `main-weed` 레이아웃으로 전환합니다(`--no-switch`로 생략).
 
-모드 이름은 이미지 경로와 모드 간 호출에 사용하므로 폴더 이름을 유지합니다. `main-weed`는 이 저장소의 `workspace-chrome`과 기본 제공 `workspace-status`, `files`도 사용합니다. 설치된 모드는 Herdr에서 자동으로 다시 읽습니다.
+모드 이름은 이미지 경로와 모드 간 호출에 사용하므로 폴더 이름을 유지합니다. `main-weed`는 이 저장소의 `workspace-chrome`과 기본 제공 `workspace-status`도 사용합니다. 설치된 모드는 Herdr에서 자동으로 다시 읽습니다.
 
 `examples/keys.json`은 현재 사용하는 단축키 전체이며 `scripts/install.py`가 자동 병합합니다. 세션 창은 `mod.open:sessions-weed`, 에이전트 복원은 `mod.open:agent-resume`, 단축키 편집은 `mod.open:keymap`으로 열 수 있습니다.
 
@@ -75,6 +78,10 @@ done
 `check`는 초기 렌더링 검사입니다. 비동기 동작, 원격 PC, 드래그, GitHub 작업은 실제 앱에서도 확인해야 합니다. Projects 백엔드를 바꾸면 `backend.py`와 JSON 문자열로 내장한 `backend-source.js`를 함께 갱신합니다.
 
 실행 중인 원본은 `~/.config/herdr-app/mods/`입니다. 여기서 계속 수정한 내용은 저장소 사본에 동기화한 뒤 커밋해야 합니다. `data/`, `shared.json`, 세션 DB, 인증 정보, 프로젝트 카탈로그, 텔레메트리, 백업은 버전 관리하지 않습니다.
+
+### herdr-lead 스킬
+
+`skills/herdr-lead/`는 Claude Code 스킬입니다 (`SKILL.md`, `lead_state.py`). `~/.claude/skills/herdr-lead/`에 복사하면 이 노트북의 Claude가 `projects.json`의 역할 PC에 작업을 보내고(`hc run --bg --on <pc>`), 보고를 기다리고, 다음 역할로 넘기기 전에 사용자에게 묻습니다. 진행 상황은 `project-lead` 패널에 표시됩니다. 역할은 사용자가 `project-spaces`의 PC 우클릭으로만 지정합니다.
 
 ### 자동화 서비스
 

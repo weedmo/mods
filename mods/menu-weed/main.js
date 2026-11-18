@@ -5,7 +5,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, focused, setShared } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, focused, setShared, hc, home } from "herdr";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s) {
@@ -21,7 +21,45 @@ async function checkout(folder, on) {
   return common.stdout.trim() === `${top.stdout.trim()}/.git` ? "main" : "linked";
 }
 
-function items(p, git) {
+// File paths printed in a terminal's recent text that exist on disk, newest first.
+const MAX_PATHS = 6;
+async function recentPaths(terminal, cwd) {
+  const r = await hc(["read", "--lines", "400", terminal]);
+  if (r.code !== 0) return [];
+  const on = terminal.includes("/") ? terminal.split("/")[0] : null;
+  const seen = new Set(), found = [];
+  // Absolute (/x/y), home (~/x) or relative (a/b.ext, ./x, ../x) paths, with backticks, quotes and :line stripped.
+  const re = /(?:~\/|\.{1,2}\/|\/)?[\w.@+-]+(?:\/[\w.@+-]+)*\/?[\w.@+-]*/g;
+  const lines = r.stdout.split("\n").reverse();
+  for (const line of lines) {
+    const hits = [...line.matchAll(re)].map((m) => m[0].replace(/[.,:;]+$/, "")).filter((x) => x.includes("/") || /\.[A-Za-z0-9]{1,8}$/.test(x)).reverse();
+    for (let raw of hits) {
+      raw = raw.replace(/[.,:;]+$/, "");
+      if (raw.length < 3 || /^https?:/.test(raw) || seen.has(raw)) continue;
+      seen.add(raw);
+      const abs = raw.startsWith("~/") ? home() + raw.slice(1) : raw.startsWith("/") ? raw : cwd ? `${cwd}/${raw}` : null;
+      if (abs) found.push({ raw, abs });
+    }
+    if (found.length > 200) break;
+  }
+  if (!found.length) return [];
+  // Keep only regular files, checked in one shell call.
+  const check = await exec("sh", ["-c", 'for p; do [ -f "$p" ] && printf "%s\\0" "$p"; done; true', "check", ...found.map((f) => f.abs)], { on }).catch(() => null);
+  const files = new Set((check?.stdout ?? "").split("\0").filter(Boolean));
+  const out = [], abs = new Set();
+  for (const f of found) {
+    const real = f.abs.replace(/\/\.\//g, "/");
+    if (!files.has(f.abs) || abs.has(real)) continue;
+    abs.add(real);
+    out.push({ ...f, abs: real });
+    if (out.length >= MAX_PATHS) break;
+  }
+  return out;
+}
+
+const short = (p) => (p.length > 38 ? "…" + p.slice(-37) : p);
+
+function items(p, git, paths) {
   p = p ?? {};
   const tg = p.target ?? {};
   switch (p.tab) {
@@ -33,6 +71,7 @@ function items(p, git) {
       // Once they go to the program, Shift+right-click still opens this menu.
       const toProgram = term?.labels?.["herdr.right-click"] === "program";
       return [
+        ...(paths ?? []).map((f) => [`Open ${short(f.raw)}`, "openfile", { path: f.abs }]),
         ["Split right", "pane.split", { direction: "right", pane: tg.pane }],
         ["Split down", "pane.split", { direction: "down", pane: tg.pane }],
         ["Zoom", "pane.zoom", { pane: tg.pane }],
@@ -83,7 +122,7 @@ function items(p, git) {
 }
 
 function menuIcon(command) {
-  const name = command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" || command === "tabmove" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
+  const name = command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" || command === "tabmove" ? "panel-right" : command === "pane.zoom" ? "square" : command === "openfile" ? "file-text" : "terminal";
   return `mods/workspace-chrome/${name}.svg`;
 }
 
@@ -108,6 +147,14 @@ export default class Menu extends View {
     const p = props();
     const space = p?.tab === "space" && spaces().find((s) => s.id === p.target?.id);
     const folder = space && place(space);
+    this.paths = [];
+    if (p?.tab === "pane" && p.target?.terminal) {
+      const cwd = panes().find((x) => x.pane === p.target.pane)?.cwd || focused()?.cwd || null;
+      cx.spawn(async (cx) => {
+        this.paths = await recentPaths(p.target.terminal, cwd).catch(() => []);
+        cx.notify();
+      });
+    }
     if (folder)
       cx.spawn(async (cx) => {
         this.git = await checkout(folder, space.machine).catch(() => null);
@@ -116,17 +163,22 @@ export default class Menu extends View {
   }
 
   choose(i, cx) {
-    const it = items(props(), this.git)[i];
+    const it = items(props(), this.git, this.paths)[i];
     if (!it) return;
     closeOverlay(props()?.overlay);
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
+    else if (it[1] === "openfile") {
+      run("layout.show", { id: "panel" });
+      run("layout.select", { stack: "panel-body", child: "files" });
+      setShared("files.open", { id: `${Date.now()}-${Math.random()}`, at: Date.now(), path: it[2].path });
+    }
     else if (it[1] === "tabmove") setShared("tabs-weed.drop", { id: `${Date.now()}-${Math.random()}`, tab: null, terminal: null, ...it[2] });
     else run(it[1], it[2]);
   }
 
   render(cx) {
     const t = theme();
-    const list = items(props(), this.git);
+    const list = items(props(), this.git, this.paths);
     return v_flex()
       .id("menu")
       .track_focus(this.handle)
@@ -146,7 +198,7 @@ export default class Menu extends View {
       .children(
         list.map((it, i) =>
           v_flex()
-            .when(i > 0 && (it[1].endsWith(".close") || it[1] === "app.help" || (it[1] === "app.theme" && list[i - 1][1] !== "app.theme")), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
+            .when(i > 0 && (it[1].endsWith(".close") || (it[1] !== "openfile" && list[i - 1][1] === "openfile") || it[1] === "app.help" || (it[1] === "app.theme" && list[i - 1][1] !== "app.theme")), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
             .child(h_flex()
             .id(`mi-${i}`)
             .h(31)

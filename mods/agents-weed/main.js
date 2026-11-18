@@ -72,8 +72,21 @@ const kidStatus = (k, listed) => {
 const SORTS = [
   { id: "priority", label: "Priority", icon: "clock" },
   { id: "grouped", label: "Grouped by space", icon: "layers" },
+  { id: "project", label: "Grouped by project", icon: "folder" },
 ];
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
+// Optional project grouping: the project-spaces sidebar publishes { spaceId: projectKey | null }.
+// Without it (that sidebar not running) "Grouped by project" falls back to grouping by space.
+const OTHER_PROJECT = "기타";
+function projectMap() {
+  const map = shared("project-spaces.projects");
+  return map && typeof map === "object" && !Array.isArray(map) ? map : null;
+}
+function projectName(key) {
+  if (!key) return OTHER_PROJECT;
+  const reg = shared("project-spaces.registry");
+  return reg?.projects?.[key]?.name || key.split("/").pop();
+}
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 
@@ -252,7 +265,10 @@ export default class Agents extends View {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
     const collapsed = narrow();
-    const sort = sortOf();
+    const chosen = sortOf();
+    const projects = chosen.id === "project" ? projectMap() : null;
+    const byProject = Boolean(projects);
+    const sort = chosen.id === "project" && !byProject ? SORTS.find((s) => s.id === "grouped") : chosen;
     let list = agents();
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
@@ -359,7 +375,7 @@ export default class Agents extends View {
         .child(svg(`mods/workspace-chrome/${isPinned ? "pin-off" : "pin"}.svg`).size(13));
       // Under a space header the space goes without saying; an automatic tab number says nothing.
       // Without a space header above (priority, pinned) the row names its space.
-      const full = byPriority || isPinned;
+      const full = byPriority || isPinned || byProject;
       const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
       return h_flex()
         .id(`ag-${a.address}`)
@@ -398,7 +414,19 @@ export default class Agents extends View {
     // Groups in list order: spaces (grouped) or priority sections. Agents of a
     // space are next to each other in agents(), so neighbours make a group.
     const groups = pinned.length ? [{ id: "pinned", label: "Pinned", status: null, members: pinned }] : [];
-    for (const a of rest) {
+    if (byProject) {
+      // A project's agents are spread over spaces and PCs: bucket them, in list order,
+      // with the 기타 (no project) group last.
+      const buckets = new Map();
+      for (const a of rest) {
+        const key = projects[a.space] ?? null;
+        const id = `proj-${key ?? "~other"}`;
+        if (!buckets.has(id)) buckets.set(id, { id, key, label: projectName(key), status: null, members: [] });
+        buckets.get(id).members.push(a);
+      }
+      const ordered = [...buckets.values()];
+      groups.push(...ordered.filter((g) => g.key), ...ordered.filter((g) => !g.key));
+    } else for (const a of rest) {
       const r = rankOf(a) || RANK.idle;
       const id = byPriority ? `sec-${r}` : `sp-${a.space}`;
       if (groups.at(-1)?.id === id) groups.at(-1).members.push(a);
@@ -426,7 +454,7 @@ export default class Agents extends View {
           cx.notify();
         })
         .child(div().truncate().text_color(t[g.status] ?? t.dim).child(g.label))
-        .when(byPriority || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
+        .when(byPriority || byProject || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
         .child(div().flex_1())
         .when(!open, (el) => el
           .when(!byPriority && top && top !== "idle", (el) => el.child(this.status(t, { status: top }, true)))
@@ -476,7 +504,7 @@ export default class Agents extends View {
                 .text_size(11)
                 .text_color(t.dim)
                 .hover((s) => s.text_color(t.foreground))
-                .on_click(() => openOverlay({ mod: "agents-weed", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
+                .on_click(() => openOverlay({ mod: "agents-weed", kind: "popup", width: 200, height: 176, props: { sortMenu: true } }))
                 .tooltip(`Sort agents: ${sort.label}`)
                 .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
             ),

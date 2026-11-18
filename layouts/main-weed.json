@@ -29,7 +29,7 @@
               "id": "spaces",
               "type": "block",
               "content": {
-                "mod": "space-folders"
+                "mod": "project-spaces"
               },
               "size": {
                 "weight": 1.4
@@ -165,7 +165,7 @@
                       "id": "files",
                       "type": "block",
                       "content": {
-                        "mod": "files"
+                        "mod": "files-weed"
                       }
                     },
                     {
@@ -202,6 +202,13 @@
                       "content": {
                         "mod": "artifact-view"
                       }
+                    },
+                    {
+                      "id": "lead",
+                      "type": "block",
+                      "content": {
+                        "mod": "project-lead"
+                      }
                     }
                   ],
                   "active": "files"
@@ -210,8 +217,6 @@
               "size": {
                 "px": 368
               },
-              "min": 280,
-              "max": 900,
               "hidden": true
             }
           ],

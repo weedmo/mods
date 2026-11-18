@@ -1,0 +1,5 @@
+{
+  "place": "none",
+  "title": "Project lead",
+  "overlay": { "kind": "window", "key": "project-lead", "width": 380, "height": 560 }
+}
