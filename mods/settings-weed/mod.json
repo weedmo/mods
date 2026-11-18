@@ -1,1 +1,10 @@
-{"place": "none", "title": "Settings", "overlay": {"kind": "dialog", "width": 980, "height": 720}}
+{
+  "place": "none",
+  "title": "Settings",
+  "overlay": {
+    "kind": "dialog",
+    "width": 980,
+    "height": 720
+  },
+  "version": "1.0.0"
+}

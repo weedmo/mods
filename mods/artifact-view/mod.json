@@ -1,1 +1,6 @@
-{ "place": "none", "title": "Artifacts", "size": 480 }
+{
+  "place": "none",
+  "title": "Artifacts",
+  "size": 480,
+  "version": "1.0.0"
+}

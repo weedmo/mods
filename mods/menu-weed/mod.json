@@ -7,5 +7,6 @@
   "overlay": {
     "width": 340,
     "height": 470
-  }
+  },
+  "version": "1.0.0"
 }

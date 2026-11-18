@@ -1,5 +1,11 @@
 {
   "place": "none",
   "title": "Project lead",
-  "overlay": { "kind": "window", "key": "project-lead", "width": 380, "height": 560 }
+  "overlay": {
+    "kind": "window",
+    "key": "project-lead",
+    "width": 380,
+    "height": 560
+  },
+  "version": "1.0.0"
 }

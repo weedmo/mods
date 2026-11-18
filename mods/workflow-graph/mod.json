@@ -1,1 +1,11 @@
-{ "place": "none", "title": "Workflow graph", "size": 520, "overlay": { "kind": "dialog", "width": 760, "height": 0.8 } }
+{
+  "place": "none",
+  "title": "Workflow graph",
+  "size": 520,
+  "overlay": {
+    "kind": "dialog",
+    "width": 760,
+    "height": 0.8
+  },
+  "version": "1.0.0"
+}
