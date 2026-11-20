@@ -297,10 +297,30 @@ def dispatch(req):
         data = read()
         location, _ = locate(data, req['locationId'])
         ident = location['identity']
-        urlrepo = f'{ident["host"]}/{ident["slug"]}'
-        raw = command(['gh', 'issue', 'list', '--repo', urlrepo, '--state', req.get('state', 'open'), '--limit', '100',
-                       '--json', 'number,title,body,url,state,labels,assignees,updatedAt'], cwd=location['path'], timeout=18)
-        return json.loads(raw)
+        owner, repo = ident['slug'].split('/', 1)
+        query = """query($owner:String!, $repo:String!, $state:IssueState!, $endCursor:String) {
+          repository(owner:$owner, name:$repo) {
+            issues(first:100, after:$endCursor, states:[$state], orderBy:{field:CREATED_AT,direction:DESC}) {
+              pageInfo { hasNextPage endCursor }
+              nodes { number title body url state updatedAt parent { number }
+                      labels(first:100) { nodes { name color } }
+                      assignees(first:100) { nodes { login } } }
+            }
+          }
+        }"""
+        args = ['gh', 'api', '--hostname', ident['host'], 'graphql', '-f', 'query=' + query,
+                '-f', 'owner=' + owner, '-f', 'repo=' + repo, '-f', 'state=' + req.get('state', 'open').upper()]
+        issues, cursor = [], None
+        while True:
+            raw = command(args + (['-f', 'endCursor=' + cursor] if cursor else []), cwd=location['path'], timeout=45)
+            page = json.loads(raw)['data']['repository']['issues']
+            for item in page['nodes']:
+                item['labels'] = item['labels']['nodes']
+                item['assignees'] = item['assignees']['nodes']
+                issues.append(item)
+            if not page['pageInfo']['hasNextPage']:
+                return issues
+            cursor = page['pageInfo']['endCursor']
     raise ValueError('Unknown operation')
 
 

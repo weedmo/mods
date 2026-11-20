@@ -3,7 +3,7 @@ import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { spaces, machines, panes, focused, exec, run, theme, props, openOverlay, closeOverlay, shared, setShared, knownAgents, notify } from "herdr";
 import { contextForSpace } from "./project-context.js";
 import { BACKEND } from "./backend-source.js";
-import { projectsFrom, checkoutSpaces, spacePath, boundSpace, localSpaceId, issueMatches, issuePrompt } from "./model.js";
+import { projectsFrom, checkoutSpaces, spacePath, boundSpace, localSpaceId, issueMatches, issuePrompt, launchArgs } from "./model.js";
 
 const STATE = "projects.catalogs.v1";
 const machineKey = m => m ?? "@local";
@@ -46,12 +46,16 @@ export default class Projects extends View {
     this.machine = props()?.machine ?? null;
     this.issues = [];
     this.issueLoaded = false;
+    this.issueLabel = "";
+    this.mainOnly = false;
     this.agents = [];
     this.agentIndex = -1;
     this.additional = false;
     this.pending = null;
     this.retryWorkId = props()?.workId ?? null;
     this.agentTicket = 0;
+    this.model = InputState.new({ value: "", placeholder: "Model ID (blank for CLI default)" });
+    this.effort = "";
     this.polling = false;
     this.base = InputState.new({ value: "", placeholder: "Base ref, e.g. origin/main" });
     this.branch = InputState.new({ value: this.issue ? `issue/${this.issue.number}` : "", placeholder: "Branch name" });
@@ -118,12 +122,18 @@ export default class Projects extends View {
   }
   loadAgents(machine, cx) {
     const ticket = ++this.agentTicket;
-    this.agents = []; this.agentIndex = -1;
+    this.agents = []; this.agentIndex = -1; this.model.set_value(""); this.effort = "";
+    this.agentsLoading = true;
     cx.spawn(async cx => {
       try {
         const list = (await knownAgents({ on: machine })).filter(a => a.installed && a.run?.length);
-        if (this.agentTicket === ticket) this.agents = list;
+        if (this.agentTicket === ticket) {
+          this.agents = list;
+          const claude = list.findIndex(a => a.key === "claude");
+          this.agentIndex = claude >= 0 ? claude : list.findIndex(a => a.agent);
+        }
       } catch (e) { if (this.agentTicket === ticket) this.error = textError(e); }
+      if (this.agentTicket === ticket) this.agentsLoading = false;
       cx.notify();
     });
   }
@@ -163,14 +173,14 @@ export default class Projects extends View {
   }
   begin(cx) {
     const l = this.location();
-    if (this.busy || !l || l.offline || l.error) return;
+    if (this.agentsLoading || this.busy || !l || l.offline || l.error) return;
     if (this.issue && !issueMatches(this.project(), this.issue)) { this.error = "Select a checkout of this issue's repository."; cx.notify(); return; }
     const leaseKey = `${l.machineId}:${l.id}:${this.issue?.number ?? this.branch.value()}`;
     const lease = shared("projects.creating") ?? {};
     if (lease[leaseKey] && Date.now() - lease[leaseKey] < 45000) { this.error = "This work is already being opened."; cx.notify(); return; }
     setShared("projects.creating", { ...lease, [leaseKey]: Date.now() });
     this.busy = true; this.error = "";
-    const argv = this.agentIndex >= 0 ? this.agents[this.agentIndex]?.run : null;
+    const argv = launchArgs(this.agents[this.agentIndex], this.model.value().trim(), this.effort);
     cx.spawn(async cx => {
       try {
         const work = await request(l.machine, { op: "start", locationId: l.id, issue: this.issue, additional: this.additional,
@@ -192,7 +202,8 @@ export default class Projects extends View {
     const spaceList = spaces(), paneList = panes();
     const existing = boundSpace(work, machine, spaceList, paneList);
     if (existing) {
-      run("space.select", { id: existing.id });
+      if (argv) run("tab.new", { space: existing.id, folder: work.path, argv, task: issuePrompt(this.issue) });
+      else run("space.select", { id: existing.id });
       cx.spawn(async cx => {
         try { await request(machine, { op: "bind", workId: work.id, spaceId: localSpaceId(existing) }); await this.refreshOne(machine); }
         catch (e) { this.fail(e, cx); return; }
@@ -204,8 +215,8 @@ export default class Projects extends View {
     const matches = checkoutSpaces(work.path, machine, spaceList, paneList);
     if (matches.length > 1) { if (leaseKey) this.release(leaseKey); return this.fail(new Error("Multiple spaces use this worktree. Select one in the sidebar."), cx); }
     try {
-      run("space.new", { machine, folder: work.path, name: work.issue ? `#${work.issue.number} ${work.title}` : work.title,
-        ...(argv ? { argv, ...(this.issue ? { task: issuePrompt(this.issue) } : {}) } : {}) });
+      run("space.new", { machine: machine ?? "", folder: work.path, name: work.issue ? `#${work.issue.number} ${work.title}` : work.title,
+        ...(argv ? { argv, task: issuePrompt(this.issue) } : {}) });
       this.pending = { work, machine, leaseKey, until: Date.now() + 10000 };
       this.busy = true; cx.notify();
     } catch (e) { if (leaseKey) this.release(leaseKey); this.fail(e, cx); }
@@ -251,7 +262,7 @@ export default class Projects extends View {
         .child(action("register", this.busy ? "Registering…" : "Register location", t, (_e, cx) => this.register(cx)));
     }
     const p = this.project(), l = this.location();
-    const result = this.dialog(t).child(this.header(this.mode === "issues" ? `${p?.name ?? "Project"} · Issues` : "Start workspace", t));
+    const result = this.dialog(t).when(this.mode === "start", e => e.overflow_y_scrollbar()).child(this.header(this.mode === "issues" ? `${p?.name ?? "Project"} · Issues` : "Start workspace", t));
     if (!p) return result.child(div().text_color(t.muted).child(this.loading ? "Loading projects…" : "Register this issue's repository on a PC first."))
       .child(action("add-missing", "Add repository location", t, () => this.overlay("register")));
     if (this.mode === "start" && this.issue) result.child(div().font_semibold().child(`#${this.issue.number} ${this.issue.title}`));
@@ -260,8 +271,15 @@ export default class Projects extends View {
       result.child(h_flex().gap(6).child(div().flex_1().child(field(this.filter, t)))
         .child(action("load-issues", this.issueLoading ? "Loading…" : "Refresh issues", t, (_e, cx) => this.loadIssues(cx))));
       if (!this.issueLoaded && !this.issueLoading && !this.error && !this.loading) this.loadIssues(cx);
-      const query = this.filter.value().toLowerCase();
-      const list = this.issues.filter(i => `${i.number} ${i.title}`.toLowerCase().includes(query));
+      const labels = new Set(["bug", "feature", "task"]);
+      for (const i of this.issues) for (const label of i.labels) labels.add(label.name.toLowerCase());
+      result.child(h_flex().gap(4).flex_wrap().children(["", ...labels].map(name =>
+        action(`issue-label-${name || "all"}`, name || "All labels", t, (_e, cx) => { this.issueLabel = name; cx.notify(); }, this.issueLabel === name))));
+      result.child(action("project-main-only", "Main issues only", t, (_e, cx) => { this.mainOnly = !this.mainOnly; cx.notify(); }, this.mainOnly));
+      const query = this.filter.value().trim().toLowerCase();
+      const list = this.issues.filter(i => (!this.mainOnly || i.parent === null)
+        && (!this.issueLabel || i.labels.some(l => l.name.toLowerCase() === this.issueLabel))
+        && `#${i.number} ${i.title}`.toLowerCase().includes(query));
       result.child(v_flex().id("project-issues").flex_1().min_h(0).overflow_y_scrollbar().gap(5).children(list.map(i =>
         v_flex().id(`issue-${i.number}`).p(9).gap(6).rounded(6).border_1().border_color(t.border)
           .child(div().child(`#${i.number} ${i.title}`))
@@ -276,9 +294,19 @@ export default class Projects extends View {
       result.child(div().text_color(t.muted).child("Work branch")); result.child(field(this.branch, t));
       result.child(div().text_color(t.muted).child("Start with"));
       result.child(h_flex().gap(5).flex_wrap().child(action("shell", "Shell", t, (_e, cx) => { this.agentIndex = -1; cx.notify(); }, this.agentIndex < 0))
-        .children(this.agents.map((a, n) => action(`agent-${n}`, a.name ?? a.id ?? a.run[0], t, (_e, cx) => { this.agentIndex = n; cx.notify(); }, this.agentIndex === n))));
+        .children(this.agents.map((a, n) => action(`agent-${n}`, a.name ?? a.id ?? a.run[0], t, (_e, cx) => { if (this.agentIndex !== n) { this.model.set_value(""); this.effort = ""; } this.agentIndex = n; cx.notify(); }, this.agentIndex === n))));
+      const key = this.agents[this.agentIndex]?.key;
+      if (key === "claude" || key === "codex") {
+        result.child(div().child("Model")).child(field(this.model, t));
+        const models = key === "claude" ? ["sonnet", "opus", "fable"] : ["gpt-6.2-sol", "gpt-6.2-astra"];
+        result.child(h_flex().gap(5).flex_wrap().children(["", ...models].map(m =>
+          action(`model-${m || "default"}`, m || "CLI default", t, (_e, cx) => { this.model.set_value(m); cx.notify(); }))));
+        const efforts = key === "claude" ? ["low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "xhigh", "max", "ultra"];
+        result.child(div().child("Reasoning effort")).child(h_flex().gap(5).flex_wrap().children(["", ...efforts].map(v =>
+          action(`effort-${v || "default"}`, v || "CLI default", t, (_e, cx) => { this.effort = v; cx.notify(); }, v === this.effort))));
+      }
       if (this.issue) result.child(action("additional", this.additional ? "✓ Create additional work" : "Reopen linked work if it exists", t, (_e, cx) => { this.additional = !this.additional; this.retryWorkId = null; this.branch.set_value(`issue/${this.issue.number}${this.additional ? "-" + Date.now().toString(36) : ""}`); cx.notify(); }, this.additional));
-      result.child(action("start-work", this.busy ? "Opening workspace…" : "Start workspace", t, (_e, cx) => this.begin(cx)));
+      result.child(action("start-work", this.agentsLoading ? "Loading agents…" : this.busy ? "Opening workspace…" : "Start workspace", t, (_e, cx) => this.begin(cx)));
     }
     return result.child(this.errorView(t));
   }
@@ -343,7 +371,7 @@ export default class Projects extends View {
           .on_click(() => {
             if (l.offline || l.error) return;
             if (matches.length === 1) run("space.select", { id: matches[0].id });
-            else if (!matches.length) run("space.new", { machine: l.machine, folder: c.path });
+            else if (!matches.length) run("space.new", { machine: l.machine ?? "", folder: c.path });
           }));
       }
     }
