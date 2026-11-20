@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.1
+
+### Changes
+
+- Install the current Graphite workspace terminal typography
+
+
 ## v1.2.0
 
 ### Mods
