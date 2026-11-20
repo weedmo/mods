@@ -586,15 +586,19 @@ def remember(term, agent, session, cwd, transcript, agent_pid, shell, watcher=Tr
     hc(["label", term, f"{LABEL}={json.dumps(label, separators=(',', ':'), ensure_ascii=False)}"], timeout=HOOK_HC_TIMEOUT)
     # Keep history independently of terminal labels: watch() deliberately clears
     # the label after a normal exit, but that must not erase the saved conversation.
-    try:
-        import importlib.util
-        app = os.environ.get("HERDR_APP_HOME") or os.path.expanduser("~/.config/herdr-app")
-        spec = importlib.util.spec_from_file_location("herdr_session_catalog", os.path.join(app, "mods", "sessions-weed", "backend.py"))
-        catalog = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(catalog)
-        catalog.capture(label, term, space=space)
-    except Exception as error:
-        log("history", terminal=term, outcome=str(error))
+    # On a remote machine there is no catalog: the desktop's Sessions window reads this label
+    # and that machine's transcripts over hc instead.
+    app = os.environ.get("HERDR_APP_HOME") or os.path.expanduser("~/.config/herdr-app")
+    backend = os.path.join(app, "mods", "sessions-weed", "backend.py")
+    if os.path.isfile(backend):
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("herdr_session_catalog", backend)
+            catalog = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(catalog)
+            catalog.capture(label, term, space=space)
+        except Exception as error:
+            log("history", terminal=term, outcome=str(error))
     if watcher:
         subprocess.Popen([sys.executable, os.path.abspath(__file__), "watch", term, str(agent_pid), str(shell)],
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
