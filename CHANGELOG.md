@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.0
+
+### Mods
+
+| mod | from | to |
+| --- | --- | --- |
+| `issues` | 1.0.0 | 1.0.1 |
+| `issues-projects` | 1.0.0 | 1.0.1 |
+| `projects` | 1.0.0 | 1.0.1 |
+
+### Changes
+
+- Support issue filtering and guided workspace analysis in Projects
+- Prefer the user-installed GitHub CLI in issue mods
+
+
 ## v1.0.1
 
 ### Mods
