@@ -4,6 +4,10 @@ import { exec, theme, openOverlay, closeOverlay, setShared, window } from "herdr
 import { icons, icon, avatarPath, loadAvatar } from "./icons.js";
 import { blocks, picture, failed, loadPicture } from "./pictures.js";
 
+export function runGh(args, options) {
+  return exec("sh", ["-c", 'PATH="$HOME/.local/bin:$PATH" exec gh "$@"', "gh", ...args], options);
+}
+
 export const FIELDS = "number,title,body,author,state,stateReason,labels,assignees,createdAt,updatedAt,comments,url";
 const DETAIL = `${FIELDS},milestone,closedByPullRequestsReferences,reactionGroups`;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -132,7 +136,7 @@ export class Viewer {
     const repo = this.repo, number = this.number, id = this.id(), current = () => this.id() === id;
     this.issue = this.cache[id] ?? null; this.error = null; this.loading = true;
     const gh = async (args) => {
-      const r = await exec("gh", args, { on: this.on });
+      const r = await runGh(args, { on: this.on });
       if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
       return JSON.parse(r.stdout);
     };
@@ -178,7 +182,7 @@ export class Viewer {
     this.busy = label; this.error = null; this.closeMenu = false;
     cx.spawn(async (cx) => {
       try {
-        const r = await exec("gh", ["issue", args[0], String(number), "-R", repo, ...args.slice(1)], { on: this.on });
+        const r = await runGh(["issue", args[0], String(number), "-R", repo, ...args.slice(1)], { on: this.on });
         if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
         after?.();
       } catch (e) { this.error = String(e?.message ?? e); }
@@ -217,7 +221,7 @@ export class Viewer {
     this.editing = !this.editing;
     const repo = this.repo;
     if (this.editing && !this.labels[repo]) cx.spawn(async (cx) => {
-      const r = await exec("gh", ["label", "list", "-R", repo, "--limit", "200", "--json", "name,color,description"], { on: this.on }).catch(() => null);
+      const r = await runGh(["label", "list", "-R", repo, "--limit", "200", "--json", "name,color,description"], { on: this.on }).catch(() => null);
       this.labels[repo] = r?.code === 0 ? JSON.parse(r.stdout).sort((a, b) => a.name.localeCompare(b.name)) : [];
       cx.notify();
     });

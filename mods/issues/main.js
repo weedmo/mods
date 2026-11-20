@@ -2,7 +2,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { spaces, panes, focused, exec, hc, run, layout, theme, openOverlay, closeOverlay, notify, props, appHome, shared, setShared } from "herdr";
 import * as fs from "fs/promises";
-import { Viewer, FIELDS, copyMenu } from "./viewer.js";
+import { Viewer, FIELDS, copyMenu, runGh } from "./viewer.js";
 import { icons, icon } from "./icons.js";
 
 // Where the focused pane is, as the Changes panel finds it. A focused mod pane
@@ -129,7 +129,7 @@ export default class Issues extends View {
   async repoFor(cwd, on) {
     const id = JSON.stringify([cwd, on]);
     if (!this.repos[id]) {
-      const r = await exec("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], { cwd, on });
+      const r = await runGh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], { cwd, on });
       if (r.code === 0) { this.repos[id] = r.stdout.trim(); localStorage.setItem("repos", JSON.stringify(this.repos)); }
     }
     return this.repos[id] ?? null;
@@ -138,7 +138,7 @@ export default class Issues extends View {
   async login(on) {
     const id = on ?? "";
     if (!this.logins[id]) {
-      const r = await exec("gh", ["api", "user", "-q", ".login"], { on });
+      const r = await runGh(["api", "user", "-q", ".login"], { on });
       if (r.code === 0) { this.logins[id] = r.stdout.trim(); localStorage.setItem("logins", JSON.stringify(this.logins)); }
     }
     return this.logins[id];
@@ -157,7 +157,7 @@ export default class Issues extends View {
   async pull(repo, store, on) {
     const started = Date.now(), full = store.version !== VERSION || started - store.full > RESYNC;
     const list = async (args) => {
-      const r = await exec("gh", ["issue", "list", "-R", repo, ...args, "--json", FIELDS], { on });
+      const r = await runGh(["issue", "list", "-R", repo, ...args, "--json", FIELDS], { on });
       if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
       return JSON.parse(r.stdout);
     };
@@ -228,7 +228,7 @@ export default class Issues extends View {
     const store = this.stores[repo];
     if (!store) return;
     cx.spawn(async (cx) => {
-      const r = await exec("gh", ["issue", "view", String(number), "-R", repo, "--json", FIELDS], { on }).catch(() => null);
+      const r = await runGh(["issue", "view", String(number), "-R", repo, "--json", FIELDS], { on }).catch(() => null);
       if (r?.code !== 0) return;
       upsert(store, [JSON.parse(r.stdout)]);
       await save(repo, store).catch(() => null);
@@ -255,7 +255,7 @@ export default class Issues extends View {
         const numbers = mentions(r.stdout, repo).filter((n) => store.known[n] !== null);
         for (const n of numbers.slice(0, MENTIONS)) {
           if (n in store.known) continue;
-          const v = await exec("gh", ["issue", "view", String(n), "-R", repo, "--json", "number,title,state"], { on: this.repoOn ?? null });
+          const v = await runGh(["issue", "view", String(n), "-R", repo, "--json", "number,title,state"], { on: this.repoOn ?? null });
           store.known[n] = v.code === 0 ? JSON.parse(v.stdout) : null;
         }
         if (repo !== this.repo) return;
