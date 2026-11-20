@@ -45,6 +45,15 @@ def database(timeout=10):
         conn.execute('''CREATE TABLE IF NOT EXISTS session_spaces (
           session_id TEXT NOT NULL, space_id TEXT NOT NULL,
           PRIMARY KEY(session_id,space_id))''')
+        columns = {r['name'] for r in conn.execute('PRAGMA table_info(sessions)')}
+        if 'transcript_missing' not in columns:
+            conn.execute('ALTER TABLE sessions ADD COLUMN transcript_missing INTEGER NOT NULL DEFAULT 0')
+        conn.execute('''CREATE TABLE IF NOT EXISTS scan_skips (
+          host TEXT NOT NULL, transcript TEXT NOT NULL, mtime_ns INTEGER NOT NULL,
+          PRIMARY KEY(host,transcript))''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS remote_scans (
+          host TEXT PRIMARY KEY, scanned_at INTEGER NOT NULL,
+          imported INTEGER NOT NULL DEFAULT 0, error TEXT)''')
         yield conn
         conn.commit()
     except BaseException:
@@ -122,6 +131,11 @@ def read_transcript(path, agent):
         payload = payload if isinstance(payload, dict) else {}
         if agent == 'codex' and event.get('type') == 'session_meta':
             meta.update(session=payload.get('id'), cwd=payload.get('cwd'))
+            source = payload.get('source')
+            # Sub-agent threads and `codex exec` runs are not conversations anyone resumes.
+            if (isinstance(source, dict) and 'subagent' in source) or source == 'exec':
+                meta['skip'] = True
+                return meta, title
         if agent == 'claude':
             if event.get('sessionId'):
                 meta['session'] = event['sessionId']
@@ -134,6 +148,18 @@ def read_transcript(path, agent):
             if text and not text.startswith(('<', '#', '{')):
                 title = text
     return meta, title
+
+
+def skipped(conn, host, path, mtime_ns):
+    row = conn.execute('SELECT mtime_ns FROM scan_skips WHERE host=? AND transcript=?', (host, str(path))).fetchone()
+    return bool(row) and row['mtime_ns'] == mtime_ns
+
+
+def remember_skip(conn, host, path, mtime_ns):
+    """Transcripts that are not resumable conversations, so scans don't parse them again."""
+    if isinstance(path, (str, Path)) and type(mtime_ns) is int:
+        conn.execute('INSERT OR REPLACE INTO scan_skips(host,transcript,mtime_ns) VALUES (?,?,?)',
+                     (host, str(path), mtime_ns))
 
 
 def scan_history(conn):
@@ -155,7 +181,12 @@ def scan_history(conn):
                                         ('', agent, str(path))).fetchone()
                 if previous and previous['source_mtime'] == stat.st_mtime_ns:
                     continue
+                if skipped(conn, '', path, stat.st_mtime_ns):
+                    continue
                 meta, title = read_transcript(path, agent)
+                if meta.get('skip'):
+                    remember_skip(conn, '', path, stat.st_mtime_ns)
+                    continue
                 if not helper.valid_session(meta.get('session')) or not meta.get('cwd'):
                     continue
                 stamp = int(stat.st_mtime * 1000)
@@ -167,6 +198,148 @@ def scan_history(conn):
                 if len(issues) < 8:
                     issues.append(f'{path.name}: {error}')
     return imported, issues
+
+
+REMOTE_TTL = 120       # seconds between history scans of one machine
+REMOTE_TIMEOUT = 60    # a first scan reads a prefix of every transcript on that machine
+
+
+def remote_main():
+    """Runs on the remote machine: report transcripts whose mtime differs from `known` (stdin)."""
+    known = json.load(sys.stdin)
+    home = Path.home()
+    claude = Path(os.environ.get('CLAUDE_CONFIG_DIR', home / '.claude')) / 'projects'
+    codex = Path(os.environ.get('CODEX_HOME', home / '.codex'))
+    roots = [('claude', claude, False), ('codex', codex / 'sessions', True), ('codex', codex / 'archived_sessions', True)]
+    found = []
+    for agent, root, deep in roots:
+        if not root.is_dir():
+            continue
+        for path in (root.rglob('*.jsonl') if deep else root.glob('*/*.jsonl')):
+            if path.name.startswith('agent-'):
+                continue
+            try:
+                stat = path.stat()
+                if known.get(str(path)) == stat.st_mtime_ns:
+                    continue
+                meta, title = read_transcript(path, agent)
+            except (OSError, ValueError):
+                continue
+            found.append(dict(agent=agent, transcript=str(path), mtime_ns=stat.st_mtime_ns,
+                              session=meta.get('session'), cwd=meta.get('cwd'), title=title,
+                              skip=bool(meta.get('skip'))))
+    # Catalog rows whose transcript is gone (or never written: an agent closed before its
+    # first message) must not look resumable.
+    missing = [path for path in known if not os.path.isfile(path)]
+    json.dump(dict(found=found, missing=missing), sys.stdout, ensure_ascii=False)
+
+
+@lru_cache(maxsize=1)
+def remote_source():
+    # Ship the same parser the local scan uses, so both sides read transcripts identically.
+    import inspect
+    parts = ['import json, os, sys', 'from pathlib import Path',
+             *(inspect.getsource(f) for f in (first_text, read_transcript, remote_main)), 'remote_main()']
+    return '\n\n'.join(parts)
+
+
+def remote_machines():
+    helper = resume_module()
+    listed = helper.hc_json(['machine', 'ls'])
+    machines = listed.get('machines', []) if isinstance(listed, dict) else listed
+    return [m['name'] for m in machines if m.get('state') == 'connected' and isinstance(m.get('name'), str)
+            and m['name'] and '/' not in m['name'] and not m['name'].startswith('-')]
+
+
+def fetch_remote(host, known):
+    helper = resume_module()
+    try:
+        result = subprocess.run([helper.hc_path(), 'exec', '--on', host, '-i', '--timeout', str(REMOTE_TIMEOUT),
+                                 '--', 'python3', '-c', remote_source()],
+                                input=json.dumps(known), capture_output=True, text=True, timeout=REMOTE_TIMEOUT + 15)
+    except (OSError, subprocess.SubprocessError) as error:
+        return None, f'{host}: {error}'
+    if result.returncode != 0:
+        return None, f'{host}: ' + ((result.stderr or result.stdout).strip().splitlines() or ['exit %d' % result.returncode])[-1][:200]
+    try:
+        report = json.loads(result.stdout)
+    except ValueError:
+        return None, f'{host}: scanner did not return JSON'
+    if not isinstance(report, dict):
+        return None, f'{host}: scanner returned an unexpected shape'
+    found, missing = report.get('found'), report.get('missing')
+    return dict(found=found if isinstance(found, list) else [],
+                missing=[p for p in missing if isinstance(p, str)] if isinstance(missing, list) else []), None
+
+
+def scan_remote(force=False):
+    """Import conversation history from every connected machine. Runs detached from the UI."""
+    helper = resume_module()
+    lock = helper.runtime_lock('sessions-weed-remote-scan')
+    if lock is None:
+        return dict(skipped='another scan is running')
+    try:
+        hosts = remote_machines()
+        now = int(time.time() * 1000)
+        with database() as conn:
+            last = {r['host']: r['scanned_at'] for r in conn.execute('SELECT host,scanned_at FROM remote_scans')}
+            due = [h for h in hosts if force or now - last.get(h, 0) >= REMOTE_TTL * 1000]
+            known = {}
+            for h in due:
+                known[h] = {r['transcript']: r['source_mtime'] for r in
+                            conn.execute('SELECT transcript,source_mtime FROM sessions WHERE host=?', (h,))}
+                known[h].update({r['transcript']: r['mtime_ns'] for r in
+                                 conn.execute('SELECT transcript,mtime_ns FROM scan_skips WHERE host=?', (h,))})
+        # Remote calls happen without an open transaction, so hooks can still write meanwhile.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            fetched = dict(zip(due, pool.map(lambda h: fetch_remote(h, known[h]), due)))
+        summary = {}
+        with database() as conn:
+            for host, (report, error) in fetched.items():
+                imported = 0
+                for path in (report or {}).get('missing', []):
+                    conn.execute('UPDATE sessions SET transcript_missing=1 WHERE host=? AND transcript=?', (host, path))
+                    conn.execute('DELETE FROM scan_skips WHERE host=? AND transcript=?', (host, path))
+                for item in (report or {}).get('found', []):
+                    if isinstance(item, dict) and item.get('skip'):
+                        remember_skip(conn, host, item.get('transcript'), item.get('mtime_ns'))
+                        continue
+                    if not isinstance(item, dict) or not helper.valid_session(item.get('session')) or not item.get('cwd'):
+                        continue
+                    stamp = int(item['mtime_ns'] // 1_000_000)
+                    label = dict(agent=item['agent'], session=item['session'], cwd=item['cwd'],
+                                 transcript=item['transcript'], pid=1, shell=1, at=stamp, args=[])
+                    try:
+                        key = save(conn, label, host=host, title=item.get('title') or '', created=stamp,
+                                   updated=stamp, mtime=item['mtime_ns'])
+                        conn.execute('UPDATE sessions SET transcript_missing=0 WHERE id=?', (key,))
+                        imported += 1
+                    except (ValueError, TypeError, KeyError):
+                        continue
+                conn.execute('''INSERT INTO remote_scans(host,scanned_at,imported,error) VALUES (?,?,?,?)
+                  ON CONFLICT(host) DO UPDATE SET scanned_at=excluded.scanned_at,
+                    imported=excluded.imported,error=excluded.error''',
+                             (host, int(time.time() * 1000), imported, error))
+                summary[host] = error or imported
+        return dict(scanned=summary)
+    finally:
+        os.close(lock)
+
+
+def start_remote_scan(conn):
+    """Kick off a detached scan when some machine is due; never wait on the network here."""
+    newest = conn.execute('SELECT MIN(scanned_at) AS t, COUNT(*) AS n FROM remote_scans').fetchone()
+    if newest['n'] and int(time.time() * 1000) - newest['t'] < REMOTE_TTL * 1000:
+        return
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), json.dumps({'action': 'scan-remote'})],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     close_fds=True, start_new_session=True)
+
+
+def remote_issues(conn):
+    return [f"Remote history: {r['error']}" for r in
+            conn.execute('SELECT error FROM remote_scans WHERE error IS NOT NULL ORDER BY host')][:3]
 
 
 def live_terminals(host=None):
@@ -194,8 +367,15 @@ def terminal_host(terminal):
     return address.rsplit('/', 1)[0] if '/' in address else ''
 
 
+SCRIPT_HOSTS = {'node', 'nodejs', 'bun', 'deno'}  # npm-installed agents show up as their runtime
+
+
 def terminal_agent(terminal):
-    name = (terminal.get('foreground') or {}).get('name', '')
+    fg = terminal.get('foreground') or {}
+    name = fg.get('name', '')
+    argv = fg.get('argv') or []
+    if name in SCRIPT_HOSTS and len(argv) > 1 and isinstance(argv[1], str):
+        name = Path(argv[1]).name
     return {'claude-code': 'claude', 'kiro-cli': 'kiro', 'kiro-cli-chat': 'kiro'}.get(name, name)
 
 
@@ -231,8 +411,9 @@ def matching_terminal(row, terminals):
         if terminal_host(terminal) != row['host'] or terminal_agent(terminal) != row['agent']:
             continue
         label = helper.read_label(terminal.get('labels'))
-        if (label and label['session'] == row['session'] and label['transcript'] == row['transcript']
-                and label['pid'] == (terminal.get('foreground') or {}).get('pid')):
+        # The label's pid can be a child of the foreground process (an npm wrapper runs the
+        # native agent), and the label is cleared when the agent exits, so session identity is enough.
+        if label and label['session'] == row['session'] and label['transcript'] == row['transcript']:
             return terminal['address']
         if terminal['address'] == row['terminal']:
             # Captured labels belong to a PID, so a newer agent in this terminal is not the old chat.
@@ -249,6 +430,12 @@ def matching_terminal(row, terminals):
 
 def catalog(conn, scan=True):
     _, issues = scan_history(conn) if scan else (0, [])
+    if scan:
+        try:
+            start_remote_scan(conn)
+        except OSError as error:
+            issues.append(f'Remote history scan did not start: {error}')
+        issues.extend(remote_issues(conn))
     try:
         terminals, live_issues = live_terminals()
         issues.extend(live_issues[:5])
@@ -265,10 +452,34 @@ def catalog(conn, scan=True):
         item['space_ids'] = memberships.get(row['id'], [])
         item['title'] = item.pop('custom_title') or item['title'] or f"{item['agent']} · {Path(item['cwd']).name}"
         item['live_terminal'] = matching_terminal(row, terminals)
-        item['available'] = bool(row['host']) or (Path(row['cwd']).is_dir() and Path(row['transcript']).is_file())
+        if row['host']:
+            item['available'] = bool(item['live_terminal']) or not row['transcript_missing']
+        else:
+            item['available'] = bool(item['live_terminal']) or (Path(row['cwd']).is_dir() and Path(row['transcript']).is_file())
+        item['resume_command'] = resume_command(json.loads(row['label']))
         item.pop('label')
         rows.append(item)
     return dict(sessions=rows, issues=issues)
+
+
+def resume_command(label):
+    """What to paste into a shell on the session's machine when the Resume button can't help."""
+    helper = resume_module()
+    try:
+        label, _ = helper.parse_label({helper.LABEL: json.dumps(label)})
+        if not label:
+            return None
+        if label['agent'] == 'pi':
+            argv = ['pi', '--session', label['transcript'], *helper.flat(helper.launch_flags('pi', label.get('args', [])))]
+        else:
+            typed = helper.command(label)
+            if typed and label['agent'] != 'kiro':
+                return typed
+            argv = helper.resume_argv(label)
+        import shlex
+        return f"cd {shlex.quote(label['cwd'])} && " + ' '.join(shlex.quote(a) for a in argv)
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def rename(conn, key, title):
@@ -365,6 +576,8 @@ def launch(conn, key, space=None):
 
 
 def main(request):
+    if request.get('action') == 'scan-remote':
+        return scan_remote(force=bool(request.get('force')))
     with database() as conn:
         action = request.get('action', 'list')
         if action == 'list':

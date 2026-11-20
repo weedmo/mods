@@ -136,9 +136,15 @@ export default class Sessions extends View {
           this.name.focus();
           cx.notify();
         }))
+        .when(Boolean(row.resume_command), el => el.child(button(`copy-${row.id}`, "Copy command", t, (_e, cx) => {
+          // Fallback when Resume can't launch it: paste into a shell on that machine.
+          cx.write_to_clipboard(row.resume_command);
+          notify({ title: "Resume command copied", body: `${row.host ? `Run on ${row.host}: ` : ""}${row.resume_command}`, level: "success", timeout: 4000 });
+        })))
         .child(button(`archive-${row.id}`, this.archived ? "Restore" : "Archive", t, (_e, cx) =>
           this.act({ action: this.archived ? "restore" : "archive", id: row.id }, cx))))
-      .when(!row.available, el => el.child(div().text_size(11).text_color(t.blocked).child("Working folder or saved conversation is missing")));
+      .when(!row.available, el => el.child(div().text_size(11).text_color(t.blocked)
+        .child(row.host ? `Saved conversation not found on ${row.host}` : "Working folder or saved conversation is missing")));
   }
 
   render() {
