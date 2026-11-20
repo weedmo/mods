@@ -1,6 +1,7 @@
 import { View } from "gpui-kit";
 import { props } from "herdr";
 import { Graph } from "./graph.js";
+import { PullRequests } from "./pull-requests.js";
 import { Menu } from "./menu.js";
 import { Dialog } from "./dialog.js";
 import { Update } from "./update.js";
@@ -12,7 +13,7 @@ import { Settings } from "./settings.js";
 export default class GitGraph extends View {
   init(_props, cx) {
     const role = props()?.role;
-    this.part = role === "menu" ? new Menu() : role === "dialog" ? new Dialog() : role === "update" ? new Update() : role === "settings" ? new Settings() : new Graph();
+    this.part = role === "pulls" ? new PullRequests() : role === "menu" ? new Menu() : role === "dialog" ? new Dialog() : role === "update" ? new Update() : role === "settings" ? new Settings() : new Graph();
     this.part.init(cx);
   }
 

@@ -14,6 +14,8 @@ Normalized run: {source, name, status, live, start, stats, phases: [{title, mode
 import glob
 import json
 import os
+import re
+import subprocess
 from datetime import datetime
 
 MATT_STATE = {"done": "done", "in-progress": "running", "pending": "queued", "blocked": "failed", "skipped": "stopped",
@@ -63,14 +65,62 @@ def short(path):
 def discover(folders):
     """[(key, mtime, summary(), detail())] for every loop data file under the folders' repos."""
     roots = {r for r in (repo_root(f) for f in folders if f and os.path.isdir(os.path.expanduser(f))) if r}
-    out = []
+    # Worker terminals often run in a linked worktree while the coordinator
+    # writes its report in another checkout of the same repository.
+    checkouts = set(roots)
     for root in roots:
-        for f in glob.glob(os.path.join(root, "docs", "agents", "matt-auto-log", "*.data.json")):
-            out.append(entry("matt", f, root))
+        try:
+            result = subprocess.run(["git", "-C", root, "worktree", "list", "--porcelain", "-z"],
+                                    capture_output=True, timeout=3, check=True)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        checkouts.update(os.fsdecode(field[9:]) for field in result.stdout.split(b"\0")
+                         if field.startswith(b"worktree "))
+    out = []
+    for root in checkouts:
+        for directory in ("docs/agents/matt-auto-log", "scratch/matt-auto-log"):
+            base = os.path.join(root, directory)
+            for f in glob.glob(os.path.join(base, "*.data.json")):
+                out.append(entry("matt", f, root))
+            for f in glob.glob(os.path.join(base, "*.md")):
+                if not os.path.isfile(f[:-3] + ".data.json"):
+                    log = markdown_entry(f, root)
+                    if log:
+                        out.append(log)
+        for f in glob.glob(os.path.join(root, "out/design/*/run.data.json")):
+            data = load(f)
+            if isinstance(data, dict) and isinstance(data.get("stages"), list) and "tickets" in data:
+                out.append(entry("matt", f, root))
         f = os.path.join(root, ".autocode", "report", "autocode.data.json")
         if os.path.exists(f):
             out.append(entry("autocode", f, root))
     return out
+
+
+def markdown_entry(path, root):
+    try:
+        with open(path, encoding="utf-8") as stream:
+            lines = stream.read().splitlines()
+        mtime = os.path.getmtime(path)
+    except (OSError, UnicodeError):
+        return None
+    title = re.match(r"^# matt-auto log:\s*(.+)", lines[0], re.I) if lines else None
+    if not title:
+        return None
+    sections = []
+    for line in lines[1:]:
+        if line.startswith("## "):
+            sections.append((line[3:].strip(), []))
+        elif sections:
+            sections[-1][1].append(line)
+    items = [{"id": f"log:{i}", "phase": "Execution log", "label": name, "state": "recorded",
+              "facts": [], "blocks": [["Log", "\n".join(body).strip()]]}
+             for i, (name, body) in enumerate(sections)]
+    summary = {"source": "matt", "runId": path, "name": title[1], "status": "recorded",
+               "project": short(root), "agents": len(items), "mtime": int(mtime * 1000)}
+    return (f"matt:{path}", mtime, lambda: dict(summary),
+            lambda: dict(summary, file=path, live=False, phases=[{"title": "Execution log", "mode": "sequential"}],
+                         agentList=items, stats=f"{len(items)} log sections"))
 
 
 def entry(source, path, root):

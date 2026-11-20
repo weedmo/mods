@@ -82,7 +82,7 @@ export default class WorkflowGraph extends View {
     for (const [m, folders] of targets) {
       const st = this.per.get(m) ?? { out: null, error: null, busy: false, at: 0 };
       this.per.set(m, st);
-      const due = force || Date.now() - st.at > IDLE_MS || (shownLive && this.run.machine === m);
+      const due = force || Date.now() - st.at > IDLE_MS || (shownLive && (this.run.machine ?? "") === m);
       if (st.busy || !due) continue;
       st.busy = true;
       const mine = this.scope;
@@ -103,8 +103,7 @@ export default class WorkflowGraph extends View {
     const tag = (m, x) => x && { ...x, machine: m || null, key: joinKey(m, x.key) };
     const all = [...this.per.entries()].filter(([, st]) => st.out);
     this.runs = all.flatMap(([m, st]) => (st.out.runs ?? []).map((x) => tag(m, x))).sort((a, b) => b.mtime - a.mtime);
-    const local = this.per.get("");
-    this.error = local?.error ?? null;
+    this.error = [...this.per.values()].find(st => st.error)?.error ?? null;
     // Pinned: that run. Otherwise the newest live run of any machine, else the newest run.
     const picks = all.map(([m, st]) => tag(m, st.out.run)).filter(Boolean);
     const isLive = (x) => x.status === "running" || x.status === "blocked";

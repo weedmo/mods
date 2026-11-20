@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { home, readTextFile, theme, watchFolder, openOverlay, closeOverlay, props, shared, setShared } from "herdr";
+import { exec, home, readTextFile, theme, watchFolder, openOverlay, closeOverlay, props, shared, setShared } from "herdr";
 
 // Agent rate-limit usage in the status bar, modeled on Orca's usage chips.
 // Claude: live from the statusLine feed (~/.local/bin/herdr-statusline-tee.sh),
@@ -16,7 +16,7 @@ const BACKOFF_BASE_MS = 30_000;
 const BACKOFF_MAX_MS = 15 * 60_000;
 const KEEP_LAST_MS = 24 * 60 * 60_000;
 
-const sched = { claude: { nextAt: 0, fails: 0 }, codex: { nextAt: 0, fails: 0 } };
+const sched = { grok: { nextAt: 0, fails: 0 }, claude: { nextAt: 0, fails: 0 }, codex: { nextAt: 0, fails: 0 } };
 
 function toMs(v) {
   if (typeof v === "number" && Number.isFinite(v)) return v < 1e12 ? v * 1000 : v;
@@ -184,15 +184,53 @@ function newRequestId() {
   return `${hex()}${hex()}-${hex()}-4${hex().slice(1)}-${hex()}-${hex()}${hex()}${hex()}`;
 }
 
+// Some Grok installations expose plan usage only inside the TUI. In that
+// case report the CLI's persisted total for the latest metered session.
+async function fetchGrok() {
+  const cli = args => exec("sh", ["-c", 'PATH="$HOME/.local/bin:$HOME/.grok/bin:$PATH" exec grok "$@"', "grok", ...args], { timeout: 10000 });
+  try {
+    const plan = await cli(["usage"]);
+    if (plan.code === 0 && plan.stdout.trim()) {
+      const detail = plan.stdout.trim();
+      const percent = detail.match(/\d+(?:\.\d+)?\s*%/);
+      return succeed("grok", { windows: [], at: Date.now(), src: "cli", detail, caption: percent ? percent[0] : "Plan" });
+    }
+    if (plan.code === 127) {
+      sched.grok.nextAt = Date.now() + POLL_MS;
+      if (state().grok) publish("grok", null);
+      return;
+    }
+    const list = await cli(["sessions", "list", "--all", "-n", "10"]);
+    const ids = list.stdout.match(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?=\s)/gim) ?? [];
+    for (const id of ids) {
+      const r = await cli(["usage", id]);
+      if (r.code !== 0) continue;
+      const usage = JSON.parse(r.stdout).session;
+      if (!Number.isFinite(usage?.totalTokens)) continue;
+      const n = usage.totalTokens;
+      return succeed("grok", { windows: [], at: Date.now(), src: "cli",
+        caption: `${n >= 1000 ? Math.round(n / 1000) + "k" : n} tok`,
+        detail: `Latest metered session · ${usage.primaryModelId || id}\n${n.toLocaleString()} total tokens` });
+    }
+    sched.grok.nextAt = Date.now() + POLL_MS;
+    if (state().grok) publish("grok", null);
+  } catch {
+    sched.grok.nextAt = Date.now() + POLL_MS;
+    if (state().grok) publish("grok", { ...state().grok, error: "Grok usage unavailable" });
+  }
+}
+
 async function runDue(force) {
   const now = Date.now();
   const jobs = [];
+  if (force || now >= sched.grok.nextAt) jobs.push(fetchGrok());
   if (force || now >= sched.claude.nextAt) jobs.push(fetchClaude());
   if (force || now >= sched.codex.nextAt) jobs.push(fetchCodex());
   await Promise.all(jobs.map((p) => p.catch(() => {})));
 }
 
-const PROVIDERS = [["claude", "Claude"], ["codex", "Codex"]];
+const PROVIDERS = [["claude", "Claude"], ["codex", "Codex"], ["grok", "Grok"]];
+const visibleProviders = s => PROVIDERS.filter(([key]) => key !== "grok" || s.grok);
 const tone = (p) => (p >= 80 ? "urgent" : p >= 60 ? "warning" : "normal");
 const toneColor = (t, k) => (k === "urgent" ? t.blocked : k === "warning" ? t.working : t.done);
 const shown = (e) => (e?.windows ?? []).filter((w) => w.pct != null);
@@ -263,10 +301,11 @@ export default class UsageWeed extends View {
 
   chip(t, key, label, e) {
     const h = headline(e);
-    const open = () => openOverlay({ mod: "usage-weed", kind: "popup", at: "pointer", width: 320, height: 250 });
+    const open = () => openOverlay({ mod: "usage-weed", kind: "popup", at: "pointer", width: 320, height: state().grok ? 335 : 250 });
     const base = h_flex().id(`usage-${key}`).flex_none().gap(5).items_center().px(4).rounded(4)
       .hover((s) => s.bg(t.hover)).on_click(open);
     if (!e) return base.child(div().text_color(t.dim).child(`${label} ···`));
+    if (e.caption) return base.child(div().size(6).rounded(3).bg(e.error ? t.dim : t.done)).child(div().child(label)).child(div().text_color(t.muted).child(e.caption));
     if (!h) return base.child(div().text_color(t.dim).child(`${label} --`));
     const k = tone(h.pct);
     const c = toneColor(t, k);
@@ -297,13 +336,13 @@ export default class UsageWeed extends View {
         .child(div().font_semibold().child("Agent usage limits"))
         .child(div().id("usage-refresh").px(6).rounded(4).text_color(t.muted).hover((st) => st.bg(t.hover))
           .on_click((_e, cx) => this.refresh(cx)).child(this.busy ? "Refreshing…" : "Refresh")))
-      .children(PROVIDERS.map(([key, label]) => {
+      .children(visibleProviders(s).map(([key, label]) => {
         const e = s[key];
         const head = h_flex().gap(6).items_center()
           .child(div().text_color(t.muted).child(label))
           .when(Boolean(e?.plan), (el) => el.child(div().text_color(t.dim).child(e.plan)))
           .child(div().flex_1())
-          .child(div().text_color(t.dim).child(e ? `${e.src === "statusline" ? "live" : "api"} · ${fmtAge(e.at)}` : "loading"));
+          .child(div().text_color(t.dim).child(e ? `${e.src === "statusline" ? "live" : e.src === "cli" ? "cli" : "api"} · ${fmtAge(e.at)}` : "loading"));
         const rows = (e?.windows ?? []).map((w) => w.pct == null
           ? h_flex().gap(8).items_center()
             .child(div().w(26).text_color(t.dim).child(w.label))
@@ -314,8 +353,9 @@ export default class UsageWeed extends View {
             .child(div().w(34).child(`${Math.round(w.pct)}%`))
             .child(div().text_color(t.dim).truncate().child(fmtReset(w.resetsAt))));
         return v_flex().gap(4).child(head).children(rows)
+          .when(Boolean(e?.detail), el => el.child(div().text_color(t.muted).child(e.detail)))
           .when(Boolean(e?.error), (el) => el.child(div().text_color(t.blocked).child(e.error)))
-          .when(Boolean(e) && !rows.length && !e.error, (el) => el.child(div().text_color(t.dim).child("No limits reported")))
+          .when(Boolean(e) && !rows.length && !e.detail && !e.error, (el) => el.child(div().text_color(t.dim).child("No limits reported")))
           .when(key === "codex" && Boolean(e?.credits), (el) => el.child(this.resetRow(t, e)));
       }));
   }
@@ -376,6 +416,6 @@ export default class UsageWeed extends View {
     const s = state();
     return h_flex().size_full().px(10).gap(10).items_center().justify_start()
       .bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8)
-      .children(PROVIDERS.map(([key, label]) => this.chip(t, key, label, s[key])));
+      .children(visibleProviders(s).map(([key, label]) => this.chip(t, key, label, s[key])));
   }
 }

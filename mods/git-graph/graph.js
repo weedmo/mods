@@ -634,6 +634,9 @@ export class Graph {
       .when(Boolean(available()), (e) => e.child(h_flex().id("graph-update").h(24).px(7).gap(5).flex_none().items_center().rounded(6).text_size(11.5)
         .cursor_pointer().text_color(t.accent).hover((s) => s.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click(() => openUpdate()).child(div().size(6).rounded(3).bg(t.accent)).child("Update Graph")))
+      .when(ready && this.remoteNames?.length > 0, e => e.child(this.iconButton("graph-prs", "branch", "PRs", false, () =>
+        openOverlay({ mod: "git-graph", kind: "dialog", width: 0.82, height: 0.85,
+          props: { role: "pulls", cwd: this.root, on: this.on } }), t)))
       .when(ready && this.remoteNames?.length > 0, (e) => e.child(this.iconButton("graph-fetch", "fetch", this.fetching ? "Fetching…" : null, false, (_e, cx) => this.fetch(cx), t)))
       .when(this.state === "workspace", (e) => {
         const run = this.fetchAll?.root === ws.root ? this.fetchAll : null;
