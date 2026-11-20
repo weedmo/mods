@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.2.0
+
+### Mods
+
+| mod | from | to |
+| --- | --- | --- |
+| `git-graph` | 1.0.0 | 1.0.1 |
+| `usage-weed` | 1.0.0 | 1.0.1 |
+| `workflow-graph` | 1.0.0 | 1.0.1 |
+
+### Changes
+
+- Add pull request browsing and merging, discover matt-loop reports, and display Grok usage
+
+
 ## v1.1.0
 
 ### Mods
