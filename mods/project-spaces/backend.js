@@ -12,7 +12,7 @@
 //   removeCreated(machine, ...)   delete the folder a failed clone made (after confirming)
 
 import { exec, hc } from "herdr";
-import { normPath, cloneTarget } from "./project-model.js";
+import { normPath, cloneTarget, normalizeRemote, remoteScheme, remoteUrl } from "./project-model.js";
 
 const opts = (machine, timeout = 20000) => ({ on: machine ?? null, timeout });
 
@@ -160,6 +160,42 @@ export async function lsRemote(machine, url, branch) {
   return { ok: r.code === 0, out: r.stdout.trim(), err: redactUrl(r.stderr.trim()) };
 }
 
+// The most telling line of git's stderr: the cause ("Permission denied
+// (publickey)", "Repository not found", ...), not the generic closing advice.
+export function gitErrLine(err) {
+  const lines = String(err ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const boring = /^(fatal: Could not read from remote repository|Please make sure you have the correct access rights|and the repository exists)/i;
+  const line = lines.find((l) => /permission denied|not found|could not resolve|timed out|refused|authentication failed|host key/i.test(l))
+    ?? lines.filter((l) => !boring.test(l)).pop() ?? lines.pop() ?? "";
+  return line.slice(0, 200) || "no access";
+}
+
+// A remote's branches (default first, then by name) and its default branch, or
+// { ok: false, err } when the remote can't be read from that PC.
+export async function remoteBranches(machine, url) {
+  const u = String(url ?? "").trim();
+  if (!u) return { ok: false, err: "no URL", list: [], def: null };
+  const [heads, head] = await Promise.all([
+    lsRemote(machine, u, null),
+    exec(NO_PROMPT[0], [...NO_PROMPT.slice(1), "git", "ls-remote", "--symref", "--", u, "HEAD"], opts(machine, 45000)).catch(() => null),
+  ]);
+  if (!heads.ok) return { ok: false, err: gitErrLine(heads.err), list: [], def: null };
+  const list = heads.out.split("\n").map((l) => l.split("\t")[1]?.trim()).filter((r) => r?.startsWith("refs/heads/")).map((r) => r.slice(11));
+  const def = /^ref: refs\/heads\/(\S+)\s+HEAD/m.exec(head?.stdout ?? "")?.[1] ?? null;
+  list.sort((a, b) => (b === def) - (a === def) || a.localeCompare(b));
+  return { ok: true, err: null, list, def };
+}
+
+// The same repo over the other protocol (ssh <-> https), when that one is readable.
+export async function altScheme(machine, url) {
+  const ident = normalizeRemote(url);
+  const scheme = remoteScheme(url);
+  if (!ident || !scheme) return null;
+  const alt = remoteUrl(ident, scheme === "ssh" ? "https" : "ssh");
+  const r = await lsRemote(machine, alt, null).catch(() => null);
+  return r?.ok ? alt : null;
+}
+
 export function validBranch(b) {
   const s = String(b ?? "").trim();
   if (!s) return true;
@@ -173,6 +209,7 @@ export async function preflightClone(machine, { parent, name, url, branch }) {
   const add = (id, ok, level, text) => checks.push({ id, ok, level: ok ? "info" : level, text });
   const target = isAbs(parent) ? cloneTarget(parent, name) : null;
   let existing = null;
+  let altUrl = null;
   if (!target) add("target", false, "error", "Choose a parent folder and a plain folder name.");
   if (!String(url ?? "").trim()) add("url", false, "error", "Enter the remote URL.");
   if (!validBranch(branch)) add("branch", false, "error", "That branch name is not valid.");
@@ -189,13 +226,14 @@ export async function preflightClone(machine, { parent, name, url, branch }) {
   }
   if (v.code === 0 && String(url ?? "").trim()) {
     const r = await lsRemote(machine, url.trim(), null);
-    add("auth", r.ok, "error", r.ok ? "Remote reachable, access ok." : `Can't read the remote: ${(r.err.split("\n").filter(Boolean).pop() ?? "").slice(0, 200) || "no access"}`);
+    add("auth", r.ok, "error", r.ok ? "Remote reachable, access ok." : `Can't read the remote: ${gitErrLine(r.err)}`);
+    if (!r.ok) altUrl = await altScheme(machine, url.trim());
     if (r.ok && branch?.trim()) {
       const b = await lsRemote(machine, url.trim(), branch.trim());
       add("branch-exists", Boolean(b.ok && b.out), "warn", b.ok && b.out ? `Branch ${branch.trim()} exists.` : `Branch ${branch.trim()} is not on the remote.`);
     }
   }
-  return { ok: checks.every((c) => c.ok || c.level !== "error"), checks, target, existing };
+  return { ok: checks.every((c) => c.ok || c.level !== "error"), checks, target, existing, altUrl };
 }
 
 // Fixed script: makes the target (fails if it exists, so a later delete only ever

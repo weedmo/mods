@@ -15,9 +15,9 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState } from "gpui-base";
 import { closeOverlay, openOverlay, run, shared, hc, notify, readTextFile, appHome, checking } from "herdr";
 import { ROLES, cleanRoles, setRoles } from "./project-model.js";
-import { mergeCatalogs, machineKey, emptyRegistry, decideConnect, linkPath, remoteKey, repoName, suggestCloneUrl, normalizeRemote, normPath } from "./project-model.js";
+import { mergeCatalogs, machineKey, emptyRegistry, decideConnect, linkPath, remoteKey, repoName, suggestCloneUrl, normalizeRemote, normPath, remoteScheme, remoteUrl } from "./project-model.js";
 import { sharedRegistry, loadRegistry, updateRegistry, CATALOGS } from "./registry.js";
-import { inspectGit, preflightClone, startClone, cloneProgress, removeTerminal, removeCreated, redactUrl, hasCredentials,
+import { inspectGit, preflightClone, remoteBranches, startClone, cloneProgress, removeTerminal, removeCreated, redactUrl, hasCredentials,
   branches, addWorktree, worktreePath, remoteHome, parentOf, validBranch } from "./backend.js";
 import { FolderBrowser, rememberRecent } from "./folder-browser.js";
 import { button, dialog, note, roleBadge, pcLabel, icon, field, message, card } from "./ui.js";
@@ -282,16 +282,93 @@ export class AddPcDialog {
     const url = cloneUrlFor(this.key, this.spec.remotes ?? []);
     this.urlInput = InputState.new({ value: url, placeholder: "git@host:owner/repo.git or https://…" });
     this.nameInput = InputState.new({ value: repoName(url) ?? normalizeRemote(url)?.slug.split("/").pop() ?? "", placeholder: "folder name" });
-    this.branchInput = InputState.new({ value: "", placeholder: "default branch" });
+    this.branch = ""; // "" = the remote's default branch
+    this.branchOpen = false;
     const stale = (_e, cx) => { this.preflight = null; cx.notify(); };
-    for (const i of [this.urlInput, this.nameInput, this.branchInput]) { i.on("change", stale); i.on("submit", (_e, cx) => this.check(cx)); }
+    for (const i of [this.urlInput, this.nameInput]) { i.on("change", stale); i.on("submit", (_e, cx) => this.check(cx)); }
+    this.remote = null; // { url, loading, ok, err, list, def }: branches of the URL's remote on that PC
+    this.urlInput.on("change", (_e, cx) => { if (this.remote && this.remote.url !== this.urlInput.value().trim()) { this.remote = null; this.branchOpen = false; cx.notify(); } });
+    this.loadBranches(cx);
     this.parentBrowser = new FolderBrowser({ machine: this.machine, projectKey: this.key, id: "ps-fb-parent",
       pinned: this.linkedOn(this.machine).map(parentOf), onChange: (_b, cx) => { this.preflight = null; } });
     return this.parentBrowser.open(null, cx);
   }
 
   cloneSpec() {
-    return { parent: this.parentBrowser?.path, name: this.nameInput.value().trim(), url: this.urlInput.value().trim(), branch: this.branchInput.value().trim() };
+    return { parent: this.parentBrowser?.path, name: this.nameInput.value().trim(), url: this.urlInput.value().trim(), branch: this.branch };
+  }
+
+  // Lists the remote's branches as seen from that PC, for the branch picker.
+  loadBranches(cx) { return spawned(cx, (cx) => this._loadBranches(cx)); }
+  async _loadBranches(cx) {
+    const url = this.urlInput.value().trim();
+    if (!url || (this.remote?.url === url && (this.remote.loading || this.remote.ok))) return;
+    this.remote = { url, loading: true, ok: false, err: null, list: [], def: null };
+    cx.notify();
+    const r = await remoteBranches(this.machine, url).catch((e) => ({ ok: false, err: errText(e), list: [], def: null }));
+    if (this.remote?.url !== url) return; // the URL changed meanwhile
+    this.remote = { url, loading: false, ...r };
+    cx.notify();
+  }
+
+  // Branch dropdown: a trigger showing the choice; pressing it toggles the list.
+  branchTrigger(t) {
+    const r = this.remote;
+    const label = this.branch || (r?.def ? `${r.def} (default)` : "Default branch");
+    const hint = !r ? "not loaded" : r.loading ? "loading…" : !r.ok ? "can't read remote" : null;
+    return v_flex().gap(5)
+      .child(div().text_size(11.5).text_color(t.dim).child("Branch"))
+      .child(h_flex().id("ps-clone-branch").h(32).px(10).gap(6).items_center().rounded(8).border_1()
+        .border_color(this.branchOpen ? t.accent : t.input).bg(t.background).text_size(12.5)
+        .cursor_pointer().hover((st) => st.border_color(t.accent))
+        .on_click((_e, cx) => {
+          this.branchOpen = !this.branchOpen;
+          if (this.branchOpen && !(this.remote?.ok || this.remote?.loading)) { this.remote = null; this.loadBranches(cx); }
+          cx.notify();
+        })
+        .child(div().flex_1().min_w(0).truncate().text_color(this.branch ? t.foreground : t.muted).child(hint ? `${label} · ${hint}` : label))
+        .child(div().flex_none().text_size(10).text_color(t.dim).child(this.branchOpen ? "▲" : "▼")));
+  }
+
+  // The open list under the Name/Branch row: default first, then every remote branch.
+  branchList(t) {
+    const r = this.remote;
+    const box = (children) => v_flex().id("ps-br-list").max_h(180).overflow_y_scrollbar().p(4).rounded(8)
+      .border_1().border_color(t.border).bg(t.raised).children(children);
+    if (!r || r.loading) return box([div().px(8).py(6).text_size(12).text_color(t.dim).child("Loading branches…")]);
+    if (!r.ok) return box([message(t, "ps-br-err", "error", `Can't read the remote: ${r.err}`)]);
+    const row = (id, value, label, extra) => {
+      const on = value === this.branch;
+      return h_flex().id(id).h(26).px(8).gap(8).items_center().rounded(5).text_size(12.5)
+        .bg(on ? t.accent + "22" : t.raised).text_color(on ? t.accent : t.foreground)
+        .cursor_pointer().hover((st) => st.bg(t.hover))
+        .on_click((_e, cx) => this.pickBranch(value, cx))
+        .child(div().w(12).flex_none().child(on ? "✓" : ""))
+        .child(div().flex_1().min_w(0).truncate().child(label))
+        .when(Boolean(extra), (el) => el.child(div().flex_none().text_size(10.5).text_color(t.dim).child(extra)));
+    };
+    return box([
+      row("ps-br-def", "", "Default branch", r.def ?? null),
+      ...r.list.map((b, n) => row(`ps-br-${n}`, b, b, b === r.def ? "default" : null)),
+    ]);
+  }
+
+  pickBranch(b, cx) {
+    this.branch = b;
+    this.branchOpen = false;
+    this.preflight = null;
+    cx.notify();
+  }
+
+  // Rewrites the Remote URL to the same repo over ssh or https and checks again.
+  setScheme(scheme, cx) {
+    const ident = normalizeRemote(this.urlInput.value().trim());
+    const url = remoteUrl(ident, scheme);
+    if (!url) return;
+    this.urlInput.set_value(url);
+    this.preflight = null;
+    cx.notify();
+    return this.check(cx);
   }
 
   check(cx) { return spawned(cx, (cx) => this._check(cx)); }
@@ -306,6 +383,10 @@ export class AddPcDialog {
       this.preflight.spec = s;
       if (hasCredentials(s.url)) this.preflight.checks.push({ id: "creds", ok: false, level: "warn", text: "The URL carries a password or token; it will be stored in that checkout's .git/config." });
       if (remoteKey(s.url) && remoteKey(s.url) !== this.key) this.preflight.checks.push({ id: "other", ok: false, level: "warn", text: `That URL is ${remoteKey(s.url)}, not ${this.key}.` });
+      if (this.preflight.checks.some((c) => c.id === "auth" && c.ok) && !(this.remote?.ok && this.remote.url === s.url)) this._loadBranches(cx).catch(() => {});
+      const alt = this.preflight.altUrl;
+      if (alt) this.preflight.checks.push({ id: "alt", ok: false, level: "warn",
+        text: `${remoteScheme(alt) === "https" ? "HTTPS" : "SSH"} works on this PC: ${alt}. Use it instead.` });
     } catch (e) {
       this.preflight = null;
       this.msg = { level: "error", text: errText(e) };
@@ -453,11 +534,23 @@ export class AddPcDialog {
       body.push(this.parentBrowser.render(t, { height: 170 }));
       body.push(h_flex().gap(10)
         .child(div().flex_1().child(field(t, "ps-clone-name", "Folder name", this.nameInput, s.parent && s.name ? `→ ${normPath(s.parent)}/${s.name}` : null)))
-        .child(div().w(170).flex_none().child(field(t, "ps-clone-branch", "Branch (optional)", this.branchInput))));
+        .child(div().w(200).flex_none().child(this.branchTrigger(t))));
+      if (this.branchOpen) body.push(this.branchList(t));
       body.push(field(t, "ps-clone-url", "Remote URL", this.urlInput));
+      const cur = remoteScheme(s.url), canSwitch = Boolean(normalizeRemote(s.url));
+      body.push(h_flex().id("ps-clone-scheme").gap(6).items_center()
+        .child(div().text_size(11.5).text_color(t.dim).mr(2).child("Protocol"))
+        .children(["ssh", "https"].map((sc) => h_flex().id(`ps-scheme-${sc}`).h(24).px(10).items_center().rounded(6).border_1()
+          .border_color(cur === sc ? t.accent : t.input).bg(cur === sc ? t.accent + "22" : t.raised)
+          .text_size(11.5).text_color(cur === sc ? t.accent : t.foreground)
+          .when(!canSwitch || this.busy, (el) => el.opacity(0.5))
+          .when(canSwitch && !this.busy && cur !== sc, (el) => el.cursor_pointer().hover((st) => st.opacity(0.85)).on_click((_e, cx) => this.setScheme(sc, cx)))
+          .child(sc === "ssh" ? "SSH" : "HTTPS"))));
       for (const [n, c] of (this.preflight?.checks ?? []).entries()) body.push(message(t, `ps-pf-${n}`, c.ok ? "ok" : c.level === "warn" ? "warn" : "error", c.text));
       foot.push(back("mode"));
       if (this.preflight?.existing?.git) foot.push(button(t, "ps-clone-connect", "Connect it instead", false, (_e, cx) => this.connectInstead(cx)));
+      const alt = this.preflight?.altUrl;
+      if (alt && !this.preflight.ok) foot.push(button(t, "ps-clone-alt", `Use ${remoteScheme(alt) === "https" ? "HTTPS" : "SSH"}`, false, (_e, cx) => this.setScheme(remoteScheme(alt), cx), { disabled: this.busy }));
       foot.push(button(t, "ps-clone-check", this.busy ? "Checking…" : "Check", false, (_e, cx) => this.check(cx), { disabled: this.busy }));
       foot.push(button(t, "ps-clone-go", "Clone", true, (_e, cx) => this.clone(cx), { disabled: this.busy || !this.preflight?.ok }));
     } else if (this.step === "cloning" || this.step === "failed" || this.step === "confirm-delete") {
