@@ -54,6 +54,7 @@
     "ctrl-shift-o": "pane.split:right",
     "ctrl-shift-e": "pane.split:down",
     "ctrl-shift-w": "tabs-weed.close-archive-tab",
+    "ctrl-w": "tab.close",
     "ctrl-shift-x": "pane.close",
     "ctrl-shift-z": "pane.zoom",
     "ctrl-shift-l": "layout.switch",
