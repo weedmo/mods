@@ -87,6 +87,7 @@ function items(p, git, paths) {
           : []),
         ...(parent ? [[`Send back to ${parent.name || parent.address}`, "terminal.park", { terminal: term.address }]] : []),
         ["Close pane", "pane.close", { pane: tg.pane }],
+        ...(term ? [["Close and archive session", "closearchive", { pane: tg.pane }]] : []),
       ];
     }
     case "tab":
@@ -101,6 +102,7 @@ function items(p, git, paths) {
              ["Move to split: up", "tabmove", { tab: tg.id, place: "up" }]]
           : []),
         ["Close", "tab.close", { id: tg.id }],
+        ...(panes().some((x) => x.tab === tg.id && x.terminal) ? [["Close and archive sessions", "closearchive", { tab: tg.id }]] : []),
       ];
     case "space":
       return [
@@ -122,13 +124,14 @@ function items(p, git, paths) {
 }
 
 function menuIcon(command) {
-  const name = command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" || command === "tabmove" ? "panel-right" : command === "pane.zoom" ? "square" : command === "openfile" ? "file-text" : "terminal";
+  const name = command.endsWith(".close") ? "x" : command === "closearchive" ? "archive" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" || command === "tabmove" ? "panel-right" : command === "pane.zoom" ? "square" : command === "openfile" ? "file-text" : "terminal";
   return `mods/workspace-chrome/${name}.svg`;
 }
 
 // The key bound to a command, for the hint on the right.
 function shortcut(name, args) {
   // `pane.split:right` binds pane.split with { direction: "right" }.
+  if (name === "closearchive") return keys().find((b) => b.section === "global" && b.action === (args.tab ? "tabs-weed.close-archive-tab" : "tabs-weed.close-archive"))?.keys ?? "";
   if (name === "tabmove") {
     const k = keys().find((b) => b.section === "global" && b.action === (args.place === "tab" ? "tabs-weed.detach" : `tabs-weed.pull-${args.place}`));
     return k && args.place === "tab" ? k.keys : "";
@@ -172,6 +175,8 @@ export default class Menu extends View {
       run("layout.select", { stack: "panel-body", child: "files" });
       setShared("files.open", { id: `${Date.now()}-${Math.random()}`, at: Date.now(), path: it[2].path });
     }
+    // tabs-weed outlives this menu, so it does the archive-then-close.
+    else if (it[1] === "closearchive") setShared("tabs-weed.close-archive", { id: `${Date.now()}-${Math.random()}`, ...it[2] });
     else if (it[1] === "tabmove") setShared("tabs-weed.drop", { id: `${Date.now()}-${Math.random()}`, tab: null, terminal: null, ...it[2] });
     else run(it[1], it[2]);
   }

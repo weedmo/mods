@@ -1,6 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, focused, notify, nextCommand, keys } from "herdr";
+import { spaces, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, focused, notify, nextCommand, keys, exec, appHome } from "herdr";
 
 // Resolve displayed shortcuts from the live keymap, rather than duplicating bindings.
 function shortcutTip(label, action, iconOnly = true) {
@@ -29,6 +29,7 @@ export default class Tabs extends View {
     cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); this.command(c); cx.notify(); } });
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
     this.lastDrop = shared("tabs-weed.drop")?.id ?? null;
+    this.lastCloseArchive = shared("tabs-weed.close-archive")?.id ?? null;
   }
 
   // A pressed tab dragged out of the bar: cover the window with the drop overlay.
@@ -94,6 +95,30 @@ export default class Tabs extends View {
     this.progressMove(cx);
   }
 
+  // Close a pane or a whole tab and move its conversations to the Sessions archive, so they
+  // don't pile up in the active list. The catalog is updated first, while the terminals are
+  // still there to say which conversation they hold; the close happens either way.
+  handleCloseArchive(request, cx) {
+    if (!request || request.id === this.lastCloseArchive) return;
+    this.lastCloseArchive = request.id;
+    if (shared("tabs-weed.close-archive")?.id === request.id) setShared("tabs-weed.close-archive", null);
+    const own = panes().filter(p => request.tab ? p.tab === request.tab : p.pane === request.pane);
+    const terminals = own.map(p => p.terminal).filter(Boolean);
+    const close = () => request.tab ? run("tab.close", { id: request.tab }) : run("pane.close", { pane: request.pane });
+    if (!terminals.length) return close();
+    cx.spawn(async () => {
+      let problem = "";
+      try {
+        const result = await exec("python3", [`${appHome()}/mods/sessions-weed/backend.py`, JSON.stringify({ action: "archive-terminals", terminals })], { timeout: 8000 });
+        const value = JSON.parse(result.stdout);
+        if (!value.ok) problem = value.error || "Session archive failed";
+        else if (!value.result.archived.length) problem = "No saved conversation was found in it.";
+      } catch (e) { problem = String(e.message || e); }
+      try { close(); } catch (e) { problem = String(e.message || e); }
+      if (problem) notify({ title: "Closed without archiving", body: problem, level: "warning", timeout: 5000 });
+    });
+  }
+
   // Key commands ("alt-shift-t": "tabs-weed.detach", "alt-shift-right": "tabs-weed.pull-right").
   // detach: the focused pane becomes its own tab. pull-<dir>: the next tab joins the focused one.
   command(c) {
@@ -101,6 +126,9 @@ export default class Tabs extends View {
     if (!f) return;
     const drop = (extra) => setShared("tabs-weed.drop", { id: `${Date.now()}-${Math.random()}`, ...extra });
     if (c === "detach") return f.terminal && drop({ terminal: f.terminal, place: "tab" });
+    // close-archive / close-archive-tab: close the focused pane or tab and archive its conversations.
+    if (c === "close-archive" || c === "close-archive-tab")
+      return setShared("tabs-weed.close-archive", { id: `${Date.now()}-${Math.random()}`, ...(c === "close-archive" ? { pane: f.pane } : { tab: f.tab }) });
     // panel-<id> ("ctrl-shift-g": "tabs-weed.panel-workflow"): toggle that side panel, like its button.
     const p = /^panel-(\w+)$/.exec(c);
     if (p) {
@@ -147,6 +175,7 @@ export default class Tabs extends View {
 
   render(cx) {
     this.handleDrop(shared("tabs-weed.drop"), cx);
+    this.handleCloseArchive(shared("tabs-weed.close-archive"), cx);
     const t = theme();
     const space = spaces().find(p => p.active);
     const shown = space?.tabs ?? [];

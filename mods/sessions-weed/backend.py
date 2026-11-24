@@ -497,6 +497,39 @@ def archive(conn, key, enabled):
         raise ValueError('Session no longer exists')
 
 
+def archive_terminals(conn, addresses):
+    """Archive the conversation each still-open terminal holds, for "close and archive".
+
+    The caller closes the terminals afterwards. Nothing is guessed from history: a terminal
+    that is already gone, or holds no conversation, archives nothing.
+    """
+    helper = resume_module()
+    if not isinstance(addresses, list) or len(addresses) > 64 \
+            or not all(isinstance(a, str) and a and not a.startswith('-') for a in addresses):
+        raise ValueError('Invalid terminal list')
+    archived = []
+    for address in dict.fromkeys(addresses):
+        try:
+            terminal = helper.hc_json(['get', address], timeout=4)
+        except helper.HcError:
+            continue
+        if not isinstance(terminal, dict) or terminal.get('state') != 'live' or terminal.get('address') != address:
+            continue
+        # A conversation started moments ago may not be in the catalog yet.
+        sync_terminals(conn, [terminal])
+        rows = conn.execute('SELECT * FROM sessions WHERE host=? AND archived_at IS NULL ORDER BY updated_at DESC,id',
+                            (terminal_host(terminal),)).fetchall()
+        keys = [row['id'] for row in rows if matching_terminal(row, [terminal])]
+        if not keys:
+            # The agent already exited and left its shell: the last conversation this same shell ran.
+            keys = [row['id'] for row in rows if row['terminal'] == address
+                    and json.loads(row['label']).get('shell') == terminal.get('pid')][:1]
+        for key in keys:
+            archive(conn, key, True)
+        archived.extend(keys)
+    return dict(archived=archived)
+
+
 def launch(conn, key, space=None):
     helper = resume_module()
     row = conn.execute('SELECT * FROM sessions WHERE id=?', (key,)).fetchone()
@@ -588,6 +621,8 @@ def main(request):
             terminals, issues = live_terminals()
             sync_terminals(conn, terminals)
             return dict(issues=issues)
+        if action == 'archive-terminals':
+            return archive_terminals(conn, request['terminals'])
         if action == 'rename':
             rename(conn, request['id'], request['title'])
         elif action in ('archive', 'restore'):

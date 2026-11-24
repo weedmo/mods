@@ -78,7 +78,10 @@ export default class Sessions extends View {
           const space = sameHost.find(space => space.id === focused()?.space) ?? sameHost[0];
           if (space) data.space = space.id.split("/").at(-1);
         }
-        const result = await request(data);
+        const { close, ...payload } = data;
+        const result = await request(payload);
+        // "Close & archive": the conversation is archived first, then its terminal goes.
+        if (close) run("terminal.kill", { terminal: close });
         if (data.action === "resume") {
           this.pending = { ...result, until: Date.now() + 15000 };
           this.reconcile(cx);
@@ -142,7 +145,9 @@ export default class Sessions extends View {
           notify({ title: "Resume command copied", body: `${row.host ? `Run on ${row.host}: ` : ""}${row.resume_command}`, level: "success", timeout: 4000 });
         })))
         .child(button(`archive-${row.id}`, this.archived ? "Restore" : "Archive", t, (_e, cx) =>
-          this.act({ action: this.archived ? "restore" : "archive", id: row.id }, cx))))
+          this.act({ action: this.archived ? "restore" : "archive", id: row.id }, cx)))
+        .when(Boolean(running) && !this.archived, el => el.child(button(`close-archive-${row.id}`, "Close & archive", t, (_e, cx) =>
+          this.act({ action: "archive", id: row.id, close: running }, cx)))))
       .when(!row.available, el => el.child(div().text_size(11).text_color(t.blocked)
         .child(row.host ? `Saved conversation not found on ${row.host}` : "Working folder or saved conversation is missing")));
   }
@@ -168,7 +173,7 @@ export default class Sessions extends View {
         .child(div().flex_1().text_size(17).font_semibold().child("Sessions"))
         .child(button("sessions-refresh", this.loading ? "Refreshing…" : "Refresh", t, (_e, cx) => this.refresh(cx)))
         .child(button("sessions-close", "Close", t, () => closeOverlay(props().overlay))))
-      .child(div().text_size(11.5).text_color(t.muted).child("Archive keeps the conversation and its running terminal. Resume continues the saved conversation."))
+      .child(div().text_size(11.5).text_color(t.muted).child("Archive keeps the conversation and its running terminal; Close & archive also closes the terminal. Resume continues the saved conversation."))
       .child(h_flex().gap(6).items_center()
         .child(button("sessions-scope-space", "Current space", t, (_e, cx) => { this.scope = "space"; cx.notify(); }, this.scope === "space"))
         .child(button("sessions-scope-all", "All spaces", t, (_e, cx) => { this.scope = "all"; cx.notify(); }, this.scope === "all"))

@@ -200,6 +200,50 @@ class Catalog(Base):
         self.assertEqual(self.listing([terminal])['01a1-codex-id']['live_terminal'], 'vn/t3f')
 
 
+class CloseAndArchive(Base):
+    def save(self, session, terminal, shell=11, at=1, pid=12):
+        with self.b.database() as conn:
+            return self.b.save(conn, dict(agent='codex', session=session, cwd='/home/u/p',
+                                          transcript=f'/home/u/.codex/sessions/{session}.jsonl',
+                                          pid=pid, shell=shell, at=at, args=[]), host='vn', terminal=terminal)
+
+    def archive(self, terminals, addresses):
+        def get(args, timeout=10):
+            if args[1] not in terminals:
+                raise self.b.resume_module().HcError('no such terminal')
+            return terminals[args[1]]
+        with mock.patch.object(self.b.resume_module(), 'hc_json', side_effect=get):
+            with self.b.database() as conn:
+                return self.b.archive_terminals(conn, addresses)['archived']
+
+    def archived(self):
+        return {r['session'] for r in self.rows() if r['archived_at']}
+
+    def test_archives_only_the_conversation_running_in_the_terminal(self):
+        running = self.save('01a1-running', 'vn/t3f')
+        self.save('01a1-earlier', 'vn/t3f', pid=7)  # an agent that ran here before and exited
+        self.save('01a1-elsewhere', 'vn/t40')
+        terminal = {'address': 'vn/t3f', 'state': 'live', 'pid': 11, 'labels': {},
+                    'foreground': {'name': 'codex', 'pid': 12, 'argv': ['codex', 'resume', '01a1-running']}}
+        self.assertEqual(self.archive({'vn/t3f': terminal}, ['vn/t3f', 'vn/t3f']), [running])
+        self.assertEqual(self.archived(), {'01a1-running'})
+
+    def test_exited_agent_archives_the_last_conversation_of_the_same_shell(self):
+        self.save('01a1-old', 'vn/t3f', at=1)
+        last = self.save('01a1-last', 'vn/t3f', at=2)
+        shell = {'address': 'vn/t3f', 'state': 'live', 'pid': 11, 'labels': {}, 'foreground': {'name': 'bash', 'pid': 11, 'argv': ['bash']}}
+        self.assertEqual(self.archive({'vn/t3f': shell}, ['vn/t3f']), [last])
+
+    def test_reused_address_or_closed_terminal_archives_nothing(self):
+        self.save('01a1-old', 'vn/t3f')
+        reused = {'address': 'vn/t3f', 'state': 'live', 'pid': 99, 'labels': {}, 'foreground': {'name': 'bash', 'pid': 99, 'argv': ['bash']}}
+        self.assertEqual(self.archive({'vn/t3f': reused}, ['vn/t3f']), [])
+        self.assertEqual(self.archive({}, ['vn/t3f']), [])
+        self.assertEqual(self.archived(), set())
+        with self.assertRaises(ValueError):
+            self.archive({}, ['--on'])
+
+
 class Ui(unittest.TestCase):
     def test_copy_command_button_writes_clipboard(self):
         source = (MODS / 'sessions-weed/main.js').read_text()

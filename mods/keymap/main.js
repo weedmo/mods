@@ -23,6 +23,7 @@ const descriptions = {
   "app.help": ["도움말 열기", "Herdr 사용 안내를 엽니다."], "app.settings": ["설정 열기", "화면 모양, 단축키 등 앱 설정을 확인합니다."], "app.palette": ["명령 검색", "실행할 기능을 이름으로 검색합니다."],
   "layout.toggle": ["사이드바 표시 / 숨기기", "왼쪽 작업 공간 목록을 접거나 펼칩니다."], "layout.switch": ["화면 배치 변경", "다른 레이아웃으로 전환합니다."],
   "terminal.copy": ["선택한 텍스트 복사", "터미널에서 선택한 텍스트를 클립보드에 복사합니다."], "terminal.paste": ["텍스트 붙여넣기", "클립보드 내용을 터미널에 입력합니다."], "terminal.paste_image": ["이미지 붙여넣기", "클립보드 이미지를 현재 터미널에 붙여넣습니다."], "terminal.search": ["터미널 내용 검색", "터미널 출력에서 원하는 문자열을 찾습니다."],
+  "tabs-weed.close-archive": ["분할 창 닫고 세션 보관", "현재 분할 터미널을 닫고 그 대화를 Sessions의 Archive로 옮깁니다."], "tabs-weed.close-archive-tab": ["탭 닫고 세션 보관", "현재 탭을 닫고 그 안의 대화를 Sessions의 Archive로 옮깁니다."],
   "tabs-weed.detach": ["분할 창을 탭으로 분리", "현재 분할 터미널을 별도의 탭으로 옮깁니다."], "tabs-weed.panel-workflow": ["워크플로 패널 열기 / 닫기", "현재 작업 공간의 워크플로 실행 상태를 확인합니다."],
 };
 const directions = {right:"오른쪽",left:"왼쪽",up:"위쪽",down:"아래쪽"};
