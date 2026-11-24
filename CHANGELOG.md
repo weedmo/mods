@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.3.0
+
+### Mods
+
+| mod | from | to |
+| --- | --- | --- |
+| `keymap` | 1.0.0 | 1.0.1 |
+| `menu-weed` | 1.0.0 | 1.0.1 |
+| `project-spaces` | 1.0.0 | 1.0.1 |
+| `sessions-weed` | 1.0.1 | 1.0.2 |
+| `tabs-weed` | 1.0.0 | 1.0.1 |
+
+### Changes
+
+- Bind Ctrl+W to plain tab close next to the archiving Ctrl+Shift+W
+- Sessions: close a pane or tab and archive its conversations in one step
+- project-spaces: switch clone remote between SSH/HTTPS and pick branch from a dropdown (#5)
+
+
 ## v1.2.1
 
 ### Changes
